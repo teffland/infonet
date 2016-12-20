@@ -30,7 +30,7 @@ def mention2str(node, tokens):
         joinstr = ""
     else:
         joinstr = " "
-    return '"{}":{}:{}'.format(joinstr.join(tokens[node['ann-span'][0]:node['ann-span'][1]+1]),
+    return '"{}":{}:{}'.format(joinstr.join(tokens[node['ann-span'][0]:node['ann-span'][1]]),
                               node['node-type'], node['type'])
 
 def relation2str(edge, node_map, tokens):
@@ -47,7 +47,8 @@ def extract_value_nodes(annotations, anchor2offset):
         for value_mention in value_mentions:
             parent_value_id = value_mention.find('feature', {'name':'value'}).text
             if parent_value_id == value['id']:
-                value_span = (anchor2offset[value_mention['start']], anchor2offset[value_mention['end']])
+                value_span = (anchor2offset[value_mention['start']],
+                              anchor2offset[value_mention['end']])
                 node = {u'ann-type':u'node',
                         u'ann-uid':value_mention['id'],
                         u'ann-span':value_span,
@@ -81,13 +82,15 @@ def extract_entity_nodes(annotations, anchor2offset, use_head_span=True, tokens=
                         head_id = head.text
                     else:
                         print "NO HEAD FOR MENTION: {}".format(entity_mention)
-                        mention_span = (anchor2offset[entity_mention['start']], anchor2offset[entity_mention['end']])
+                        mention_span = (anchor2offset[entity_mention['start']],
+                                        anchor2offset[entity_mention['end']])
                     for head_mention in head_mentions:
                         if head_mention['id'] == head_id:
                             mention_span = (anchor2offset[head_mention['start']],
                                             anchor2offset[head_mention['end']])
                 else:
-                    mention_span = (anchor2offset[entity_mention['start']], anchor2offset[entity_mention['end']])
+                    mention_span = (anchor2offset[entity_mention['start']],
+                                    anchor2offset[entity_mention['end']])
                 node = {u'ann-type':u'node',
                         u'ann-uid':entity_mention['id'],
                         u'ann-span':mention_span,
@@ -335,7 +338,8 @@ def convert_charspans_to_tokenspans(nodes, spacy_doc):
             j +=1
 
     def charspan2tokenspan((char_start, char_end)):
-        return (char2token_idxmap[char_start], char2token_idxmap[char_end])
+        # add 1 to support python style indexing
+        return (char2token_idxmap[char_start], char2token_idxmap[char_end]+1)
 
     # now convert the charspans in the nodes
     for node in nodes:
