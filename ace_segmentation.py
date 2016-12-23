@@ -7,8 +7,11 @@ import numpy.random as npr
 import chainer as ch
 
 from infonet.vocab import Vocab
-from infonet.preprocess import (Entity_BIO_map, Entity_typed_BILOU_map,
-                                compute_flat_mention_labels)
+from infonet.preprocess import (Entity_BIO_map, Entity_BILOU_map,
+                                BIO_map, BILOU_map,
+                                typed_BIO_map, typed_BILOU_map,
+                                compute_flat_mention_labels,
+                                compute_tag_map, resolve_annotations)
 from infonet.util import (convert_sequences, sequences2arrays,
                           SequenceIterator, print_epoch_loss, sec2hms)
 from infonet.tagger import Tagger, TaggerLoss
@@ -26,8 +29,13 @@ def get_ace_segmentation_data(fname, count, valid, test, **kwds):
 
     boundary_vocab = Vocab(min_count=0)
     for doc in data.values():
-        doc['boundary_labels'] = compute_flat_mention_labels(doc, Entity_BIO_map)
+        doc['annotations'] = resolve_annotations(doc['annotations'])
+        doc['boundary_labels'] = compute_flat_mention_labels(doc, typed_BIO_map)
         boundary_vocab.add(doc['boundary_labels'])
+    print boundary_vocab.vocabset
+
+    # compute the typing stats for extract all mentions
+    tag_map = compute_tag_map(boundary_vocab)
 
     # create datasets
     xy = [(doc['tokens'], doc['boundary_labels']) for doc in data.values()]
@@ -49,6 +57,7 @@ def get_ace_segmentation_data(fname, count, valid, test, **kwds):
     dataset = { 'data':data,
                 'token_vocab':token_vocab,
                 'boundary_vocab':boundary_vocab,
+                'tag_map':tag_map,
                 'x_train':x_train,
                 'y_train':y_train,
                 'x_valid':x_valid,
@@ -59,12 +68,14 @@ def get_ace_segmentation_data(fname, count, valid, test, **kwds):
 
 def train(dataset,
           batch_size, n_epoch, wait,
-          embedding_size, learning_rate, use_crf,
-          model_fname, plot_fname,
+          embedding_size, lstm_size, learning_rate,
+          use_crf, dropout,
+          model_fname, plot_fname, eval_only=False,
           **kwds):
     # unpack dataset
     token_vocab = dataset['token_vocab']
     boundary_vocab = dataset['boundary_vocab']
+    tag_map = dataset['tag_map']
     x_train = dataset['x_train']
     x_valid = dataset['x_valid']
     x_test = dataset['x_test']
@@ -89,108 +100,115 @@ def train(dataset,
     train_iter = SequenceIterator(zip(ix_train, iy_train), batch_size, repeat=True)
     valid_iter = SequenceIterator(zip(ix_valid, iy_valid), batch_size, repeat=True)
 
-    # hyperparams
-    # embedding_size = 50
-    # learning_rate = .05
-
     # model
     embed = ch.functions.EmbedID(token_vocab.v, embedding_size)
-    tagger = Tagger(embed, embedding_size, boundary_vocab.v, use_crf)
+    tagger = Tagger(embed, lstm_size, boundary_vocab.v,
+                    use_crf=use_crf,
+                    dropout=dropout)
     model_loss = TaggerLoss(tagger)
     optimizer = ch.optimizers.Adam(learning_rate)
     optimizer.setup(model_loss)
     print "Done"
 
-    # training
-    # n_epoch = 50
-    best_valid_loss = 1e50
-    n_valid_up = 0
-    epoch_losses = [[]]
-    valid_losses = []
-    forward_times = [[]]
-    backward_times = [[]]
-    seq_lengths = [[]]
-    fit_start = time.time()
-    for batch in train_iter:
-        # prepare data and model
-        x_list, y_list = zip(*batch)
-        x_list = sequences2arrays(x_list)
-        y_list = sequences2arrays(y_list)
-        model_loss.cleargrads()
-        tagger.reset_state()
-        seq_lengths[-1].append(len(x_list))
+    if not eval_only:
+        # training
+        # n_epoch = 50
+        best_valid_loss = 1e50
+        n_valid_up = 0
+        epoch_losses = [[]]
+        valid_losses = []
+        forward_times = [[]]
+        backward_times = [[]]
+        seq_lengths = [[]]
+        fit_start = time.time()
+        for batch in train_iter:
+            # prepare data and model
+            x_list, y_list = zip(*batch)
+            x_list = sequences2arrays(x_list)
+            y_list = sequences2arrays(y_list)
+            model_loss.cleargrads()
+            tagger.reset_state()
+            seq_lengths[-1].append(len(x_list))
 
-        # run model
-        start = time.time()
-        loss = model_loss(x_list, y_list)
-        forward_times[-1].append(time.time()-start)
-        loss_val = loss.data
-        # print_batch_loss(loss_val,
-        #                  train_iter.epoch+1,
-        #                  train_iter.current_position,
-        #                  train_iter.n_batches)
-        epoch_losses[-1].append(loss_val)
+            # run model
+            start = time.time()
+            loss = model_loss(x_list, y_list)
+            forward_times[-1].append(time.time()-start)
+            loss_val = loss.data
+            # print_batch_loss(loss_val,
+            #                  train_iter.epoch+1,
+            #                  train_iter.current_position,
+            #                  train_iter.n_batches)
+            epoch_losses[-1].append(loss_val)
 
-        # backprop
-        start = time.time()
-        loss.backward()
-        optimizer.update()
-        backward_times[-1].append(time.time()-start)
+            # backprop
+            start = time.time()
+            loss.backward()
+            optimizer.update()
+            backward_times[-1].append(time.time()-start)
 
-        # validation routine
-        if train_iter.is_new_epoch:
-            valid_loss = 0
-            for valid_batch in valid_iter:
-                x_list, y_list = zip(*valid_batch)
-                x_list = sequences2arrays(x_list)
-                y_list = sequences2arrays(y_list)
-                tagger.reset_state()
-                valid_loss += model_loss(x_list, y_list).data
-                if valid_iter.is_new_epoch:
+            # validation routine
+            if train_iter.is_new_epoch:
+                valid_loss = 0
+                for valid_batch in valid_iter:
+                    x_list, y_list = zip(*valid_batch)
+                    x_list = sequences2arrays(x_list)
+                    y_list = sequences2arrays(y_list)
+                    tagger.reset_state()
+                    valid_loss += model_loss(x_list, y_list).data
+                    if valid_iter.is_new_epoch:
+                        break
+                print_epoch_loss(train_iter.epoch,
+                                 np.mean(epoch_losses[-1]),
+                                 valid_loss,
+                                 time=np.sum(forward_times[-1]+backward_times[-1]))
+                valid_losses.append(valid_loss)
+                # save best
+                if valid_loss < best_valid_loss:
+                    best_valid_loss = valid_loss
+                    n_valid_up = 0
+                    ch.serializers.save_npz(model_fname, tagger)
+                else:
+                    n_valid_up += 1
+                    if n_valid_up > wait:
+                        print "Stopping early"
+                        break
+                if train_iter.epoch == n_epoch:
                     break
-            print_epoch_loss(train_iter.epoch,
-                             np.mean(epoch_losses[-1]),
-                             valid_loss,
-                             time=np.sum(forward_times[-1]+backward_times[-1]))
-            valid_losses.append(valid_loss)
-            # save best
-            if valid_loss < best_valid_loss:
-                best_valid_loss = valid_loss
-                n_valid_up = 0
-                ch.serializers.save_npz(model_fname, tagger)
-            else:
-                n_valid_up += 1
-                if n_valid_up > wait:
-                    print "Stopping early"
-                    break
-            if train_iter.epoch == n_epoch:
-                break
-            epoch_losses.append([])
-            seq_lengths.append([])
-            forward_times.append([])
-            backward_times.append([])
+                epoch_losses.append([])
+                seq_lengths.append([])
+                forward_times.append([])
+                backward_times.append([])
 
-    print "Training finished. {} epochs in {}".format(
-          n_epoch, sec2hms(time.time()-fit_start))
+        print "Training finished. {} epochs in {}".format(
+              n_epoch, sec2hms(time.time()-fit_start))
+        plot_learning_curve(epoch_losses, valid_losses, savename=plot_fname)
+
+    # restore and evaluate
     print 'Restoring best model...',
     ch.serializers.load_npz(model_fname, tagger)
     print 'Done'
-    plot_learning_curve(epoch_losses, valid_losses, savename=plot_fname)
 
     print 'Evaluating...'
     preds, x_list, y_list = tagger.predict(ix_train, iy_train)
     preds = convert_sequences(preds, boundary_vocab.token)
     xs = convert_sequences(x_list, token_vocab.token)
     ys = convert_sequences(y_list, boundary_vocab.token)
-    f1_stats = mention_boundary_stats(ys, preds)
+    f1_stats = mention_boundary_stats(ys, preds, **tag_map)
     print "Training:: P: {s[precision]:2.4f}, R: {s[recall]:2.4f}, F1: {s[f1]:2.4f}".format(s=f1_stats)
 
     preds, x_list, y_list = tagger.predict(ix_test, iy_test)
     preds = convert_sequences(preds, boundary_vocab.token)
     xs = convert_sequences(x_list, token_vocab.token)
     ys = convert_sequences(y_list, boundary_vocab.token)
-    f1_stats = mention_boundary_stats(ys, preds)
+    f1_stats = mention_boundary_stats(ys, preds, **tag_map)
     print "Testing:: P: {s[precision]:2.4f}, R: {s[recall]:2.4f}, F1: {s[f1]:2.4f}".format(s=f1_stats)
+
+    print zip(xs[-1], preds[-1], ys[-1])
+    print 'Transition matrix:'
+    print ' '.join([ v for k,v in sorted(boundary_vocab._idx2vocab.items(), key=lambda x:x[0]) ])
+    print tagger.crf.cost.data
+    print boundary_vocab.vocabset
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -237,10 +255,20 @@ def parse_args():
                         default='learning_curve.png',
                         help='Name of file to save learning curve plot to',
                         type=str)
+    parser.add_argument('--dropout',
+                        default=.25,
+                        type=float)
+    parser.add_argument('--lstm_size',
+                        default=50,
+                        type=int)
     parser.add_argument('--use_crf', action='store_true', default=False)
+    parser.add_argument('--eval_only', action='store_true', default=False)
+    parser.add_argument('--rseed', type=int, default=42,
+                        help='Sets the random seed')
     return parser.parse_args()
 
 if __name__ == '__main__':
     args = parse_args()
+    npr.seed(args.rseed)
     dataset = get_ace_segmentation_data(**vars(args))
     train(dataset, **vars(args))
