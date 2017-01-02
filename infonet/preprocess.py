@@ -216,9 +216,8 @@ def resolve_annotations(annotations):
                            reverse=True)
     resolved_annotations = []
     for node in sorted_nodes:
-        for qnode in resolved_annotations:
-            if not overlaps(node, qnode):
-                resolved_annotations.append(node)
+        if not any([ overlaps(node, qnode) for qnode in resolved_annotations]):
+            resolved_annotations.append(node)
 
     # now only include relations whose constiuent mentions are still around
     node_id_set = set([node['ann-uid'] for node in resolved_annotations ])

@@ -19,7 +19,6 @@ from chainer.utils import type_check
 
 
 class BatchWeightedSoftmaxCrossEntropy(function.Function):
-
     """Softmax activation followed by a cross entropy loss."""
 
     ignore_label = -1
@@ -93,7 +92,7 @@ class BatchWeightedSoftmaxCrossEntropy(function.Function):
         else:
             count = len(x)
         if self.instance_weight is not None:
-            self._coeff = 1. / max(np.sum(self.instance_weight), 1)
+            self._coeff = 1. / max(numpy.sum(self.instance_weight), 1)
             y = (log_p * (t.ravel() != self.ignore_label))
             y = self.instance_weight * y
             y = (-self._coeff) * y.sum(keepdims=True)

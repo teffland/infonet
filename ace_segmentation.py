@@ -84,7 +84,7 @@ def train(dataset,
     y_test = dataset['y_test']
 
     # convert dataset to idxs
-    # before we do conversions, we need to drop unfrequent words from the vocab and reindex it
+    # before we do conversions, we need to drop infrequent words from the vocab and reindex it
     print "Setting up...",
     token_vocab.drop_infrequent()
     boundary_vocab.drop_infrequent()
