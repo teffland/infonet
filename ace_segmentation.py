@@ -69,7 +69,7 @@ def get_ace_segmentation_data(fname, count, valid, test, **kwds):
 def train(dataset,
           batch_size, n_epoch, wait,
           embedding_size, lstm_size, learning_rate,
-          use_crf, dropout,
+          crf_type, dropout,
           model_fname, plot_fname, eval_only=False,
           **kwds):
     # unpack dataset
@@ -103,7 +103,7 @@ def train(dataset,
     # model
     embed = ch.functions.EmbedID(token_vocab.v, embedding_size)
     tagger = Tagger(embed, lstm_size, boundary_vocab.v,
-                    use_crf=use_crf,
+                    crf_type=crf_type,
                     dropout=dropout)
     model_loss = TaggerLoss(tagger)
     optimizer = ch.optimizers.Adam(learning_rate)
@@ -261,7 +261,8 @@ def parse_args():
     parser.add_argument('--lstm_size',
                         default=50,
                         type=int)
-    parser.add_argument('--use_crf', action='store_true', default=False)
+    parser.add_argument('--crf_type', type=str, default='none',
+                        help='Choose from none, simple, linear, simple_bilinear, and bilinear')
     parser.add_argument('--eval_only', action='store_true', default=False)
     parser.add_argument('--rseed', type=int, default=42,
                         help='Sets the random seed')

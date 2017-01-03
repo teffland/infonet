@@ -1,16 +1,20 @@
 import chainer as ch
 from util import SequenceIterator, sequences2arrays
+from crf_linear import LinearChainCRF
+
 class Tagger(ch.Chain):
     def __init__(self, embed, lstm_size, out_size,
                  dropout=.25,
-                 use_crf=False):
+                 crf_type='none'):
+        if crf_type == 'none':
+            self.crf_type = None
+            crf_type = 'simple' # it'll still be unused
         super(Tagger, self).__init__(
             embed = embed,
             lstm = ch.links.LSTM(embed.W.shape[1], lstm_size),
             out = ch.links.Linear(lstm_size, out_size),
-            crf = ch.links.CRF1d(out_size)
+            crf = LinearChainCRF(out_size, lstm_size, crf_type)
         )
-        self.use_crf = use_crf
         self.lstm_size = lstm_size
         self.out_size = out_size
         self.dropout = dropout
@@ -22,7 +26,12 @@ class Tagger(ch.Chain):
         drop = ch.functions.dropout
         embeds = [ drop(self.embed(x), self.dropout, train) for x in x_list ]
         lstms = [ drop(self.lstm(x), self.dropout, train) for x in embeds ]
-        outs = [ self.out(h) for h in lstms ]
+        if self.crt_type:
+            outs = [] # don't do extra computations
+            # NOTE: probably not the best way to do this...
+            # maybe add a parameterization to LinearChainCRF that is just sequence xent?
+        else:
+            outs = [ self.out(h) for h in lstms ]
         return outs, lstms
 
     def predict(self, x_list, y_list, return_proba=False):
@@ -32,19 +41,19 @@ class Tagger(ch.Chain):
 
         # run the model
         self.reset_state()
-        logits_list, _ = self(sequences2arrays(x_list), train=False)
+        logits_list, lstm_list = self(sequences2arrays(x_list), train=False)
         # logits_list = [ logits.data for logits in logits_list ]
 
         if return_proba:
-            if self.use_crf:
+            if self.crf_type:
                 raise NotImplementedError, "CRF sum-product decoder not implemented..."
             else:
                 probs = [ ch.functions.softmax(logit) for logit in logits_list ]
                 probs = [ prob.data for prob in ch.functions.transpose_sequence(probs) ]
                 return probs, x_list, y_list
         else:
-            if self.use_crf:
-                _, preds = self.crf.argmax(logits_list)
+            if self.crf_type:
+                _, preds = self.crf.argmax(lstm_list)
                 preds = [ pred.data for pred in ch.functions.transpose_sequence(preds) ]
                 return preds, x_list, y_list
             else:
@@ -61,9 +70,9 @@ class TaggerLoss(ch.Chain):
         self.loss_func = loss_func
 
     def __call__(self, x_list, y_list):
-        if self.tagger.use_crf:
-            yhat_list, _ = self.tagger(x_list)
-            return self.tagger.crf(yhat_list, y_list)
+        if self.tagger.crf_type:
+            _, lstm_list = self.tagger(x_list)
+            return self.tagger.crf(lstm_list, y_list)
 
         elif self.loss_func == ch.functions.softmax_cross_entropy:
             loss = 0
