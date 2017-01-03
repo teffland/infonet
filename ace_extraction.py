@@ -262,7 +262,7 @@ def train(dataset,
                 if valid_loss < best_valid_loss:
                     best_valid_loss = valid_loss
                     n_valid_up = 0
-                    ch.serializers.save_npz(model_fname, tagger)
+                    ch.serializers.save_npz(model_fname, extractor)
                 else:
                     n_valid_up += 1
                     if n_valid_up > wait:
@@ -282,7 +282,7 @@ def train(dataset,
 
     # restore and evaluate
     print 'Restoring best model...',
-    ch.serializers.load_npz(model_fname, tagger)
+    ch.serializers.load_npz(model_fname, extractor)
     print 'Done'
 
     print 'Evaluating...'

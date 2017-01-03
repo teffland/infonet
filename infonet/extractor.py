@@ -124,6 +124,7 @@ class Extractor(ch.Chain):
         return m_logits, r_logits, m_spans, r_spans
 
     def predict(self, x_list):
+        self.reset_state()
         m_logits, r_logits, m_spans, r_spans = self(x_list)
         m_preds = [ ch.functions.argmax(m, axis=1).data
                     if type(m) is ch.Variable else []
@@ -139,9 +140,9 @@ class ExtractorLoss(ch.Chain):
             extractor=extractor
         )
 
-    def __call__(self, x_list, gold_b_list, gold_m_list, gold_r_list):
+    def __call__(self, x_list, gold_b_list, gold_m_list, gold_r_list, **kwds):
         # extract the graph
-        men_logits, rel_logits, men_spans, rel_spans = self.extractor(x_list)
+        men_logits, rel_logits, men_spans, rel_spans = self.extractor(x_list, **kwds)
         # print zip([len(m) for m in men_logits], [len(r) for r in rel_logits])
         # compute loss per sequence
         mention_loss = relation_loss = 0
@@ -173,25 +174,25 @@ class ExtractorLoss(ch.Chain):
 
             # do the same for relations
             # but only if BOTH mention boundaries are correct
-            gold_rel_spans = set([r[:4] for r in gold_r])
-            rel2label = {r[:4]:r[4] for r in gold_r}
-            weights = []
-            labels = []
-            for r in r_spans:
-                # NOTE the following commented out conditional is buggy,
-                # but it should not be...
-                # there should be no relations whose spans are not gold mentions
-                if (r[:2] in gold_spans) and (r[2:4] in gold_spans):
-                # if r in gold_rel_spans:
-                    weights.append(1.0)
-                    labels.append(rel2label[r[:4]])
-                else:
-                    weights.append(0.0)
-                    labels.append(0)
-            weights = np.array(weights, dtype=np.float32)
-            labels = np.array(labels, dtype=np.int32)
-            relation_loss += batch_weighted_softmax_cross_entropy(r_logits, labels,
-                                                                 instance_weight=weights)
+            # gold_rel_spans = set([r[:4] for r in gold_r])
+            # rel2label = {r[:4]:r[4] for r in gold_r}
+            # weights = []
+            # labels = []
+            # for r in r_spans:
+            #     # NOTE the following commented out conditional is buggy,
+            #     # but it should not be...
+            #     # there should be no relations whose spans are not gold mentions
+            #     if (r[:2] in gold_spans) and (r[2:4] in gold_spans):
+            #     # if r in gold_rel_spans:
+            #         weights.append(1.0)
+            #         labels.append(rel2label[r[:4]])
+            #     else:
+            #         weights.append(0.0)
+            #         labels.append(0)
+            # weights = np.array(weights, dtype=np.float32)
+            # labels = np.array(labels, dtype=np.int32)
+            # relation_loss += batch_weighted_softmax_cross_entropy(r_logits, labels,
+            #                                                      instance_weight=weights)
         mention_loss /= batch_size
-        relation_loss /= batch_size
-        return (mention_loss + relation_loss)
+        # relation_loss /= batch_size
+        return (mention_loss)# + relation_loss)
