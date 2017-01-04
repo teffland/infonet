@@ -207,7 +207,8 @@ def train(dataset,
     print zip(xs[-1], preds[-1], ys[-1])
     print 'Transition matrix:'
     print ' '.join([ v for k,v in sorted(boundary_vocab._idx2vocab.items(), key=lambda x:x[0]) ])
-    print tagger.crf.cost.data
+    if tagger.crf_type == 'simple':
+        print tagger.crf.cost.data
     print boundary_vocab.vocabset
 
 def parse_args():

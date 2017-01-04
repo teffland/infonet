@@ -9,6 +9,8 @@ class Tagger(ch.Chain):
         if crf_type == 'none':
             self.crf_type = None
             crf_type = 'simple' # it'll still be unused
+        else:
+            self.crf_type = crf_type
         super(Tagger, self).__init__(
             embed = embed,
             lstm = ch.links.LSTM(embed.W.shape[1], lstm_size),
@@ -26,7 +28,7 @@ class Tagger(ch.Chain):
         drop = ch.functions.dropout
         embeds = [ drop(self.embed(x), self.dropout, train) for x in x_list ]
         lstms = [ drop(self.lstm(x), self.dropout, train) for x in embeds ]
-        if self.crt_type:
+        if self.crf_type:
             outs = [] # don't do extra computations
             # NOTE: probably not the best way to do this...
             # maybe add a parameterization to LinearChainCRF that is just sequence xent?

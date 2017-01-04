@@ -9,7 +9,8 @@ by passing in raw features instead of logits for xs
 Adapted from chainers CRF1d implementation
 http://docs.chainer.org/en/stable/_modules/chainer/links/loss/crf1d.html#CRF1d
 """
-from chainer import link
+import numpy as np
+from chainer import link, Variable
 from chainer.functions.array import broadcast
 from chainer.functions.array import concat
 from chainer.functions.array import reshape
@@ -77,14 +78,16 @@ class LinearChainCRF(link.Link):
         else: # all other are input-specific
             costs = []
             for xi, xj in zip(xs[:-1], xs[1:]):
+                # deal with sorted variable length sequences
+                if xj.shape[0] < xi.shape[0]:
+                    # alpha, alpha_rest = split_axis.split_axis(alpha, [batch], axis=0)
+                    xi, _ = split_axis.split_axis(xi, [xj.shape[0]], axis=0)
                 if self.param_type == 'linear':
                     x = hstack.hstack([xi,xj])
                     f = matmul.matmul(x, self.trans_cost)
-                    # f = reshape(f, (-1, self.n_label, self.n_label))
                 elif self.param_type == 'simple_bilinear':
                     x = xi * xj # elementwise product, dotted with trans costs
                     f = matmul.matmul(x, self.trans_cost)
-                    # f = reshape(f, (-1, self.n_label, self.n_label))
                 elif self.param_type == 'bilinear':
                     f = bilinear.bilinear(xi, xj, self.trans_cost)
                 bias = broadcast.broadcast_to(self.trans_bias, f.shape)
@@ -206,10 +209,10 @@ def crf1d(trans_costs, xs, ys):
         <http://repository.upenn.edu/cis_papers/159/>`_.
 
     """
-    assert all([x.shape[1] == cost.shape[0] for x, cost in zip(xs, trans_costs)])
+    assert all([x.shape[1] == cost.shape[1] for x, cost in zip(xs, trans_costs)])
     assert len(trans_costs) == (len(xs)-1), "Must have one less transition than steps"
 
-    n_label = trans_costs[0].shape[0]
+    n_label = trans_costs[0].shape[1]
     n_batch = xs[0].shape[0]
 
     alpha = xs[0]
@@ -232,6 +235,13 @@ def crf1d(trans_costs, xs, ys):
     scores = []
     for x, y, y_prev, cost in zip(xs[1:], ys[1:], ys[:-1], trans_costs):
         batch = x.shape[0]
+        # if we have a separate cost for each sequence
+        # offset each idx cost by the batch idx also
+        # else don't offset them because we don't have one for each batch
+        if len(cost.shape) == 3:
+            batch_offset = Variable(np.range(batch, dtype=y.dtype)*batch)
+        else:
+            batch_offset = Variable(np.zeros(batch, dtype=y.dtype))
         cost = reshape.reshape(cost, (-1, 1)) #ravel batch x n_label x n_label
         if score.shape[0] > batch:
             y_prev, _ = split_axis.split_axis(y_prev, [batch], axis=0)
@@ -239,7 +249,8 @@ def crf1d(trans_costs, xs, ys):
             scores.append(score_rest)
         score += (select_item.select_item(x, y)
                   + reshape.reshape(
-                      embed_id.embed_id(y_prev * n_label + y + batch, cost), (batch,)))
+                      embed_id.embed_id(y_prev * n_label + y + batch_offset, cost),
+                      (batch,)))
 
     if len(scores) > 0:
         scores.append(score)
