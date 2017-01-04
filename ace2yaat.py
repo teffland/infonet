@@ -80,14 +80,20 @@ def extract_entity_nodes(annotations, anchor2offset, use_head_span=True, tokens=
                     head = entity_mention.find('feature', {'name':'head'})
                     if head is not None:
                         head_id = head.text
+                        mention_span = None
+                        for head_mention in head_mentions:
+                            if head_mention['id'] == head_id:
+                                mention_span = (anchor2offset[head_mention['start']],
+                                                anchor2offset[head_mention['end']])
+                        if mention_span is None:
+                            print "EMPTY HEAD FOR MENTION: {}, USING FULL SPAN".format(entity_mention)
+                            mention_span = (anchor2offset[entity_mention['start']],
+                                            anchor2offset[entity_mention['end']])
                     else:
-                        print "NO HEAD FOR MENTION: {}".format(entity_mention)
+                        print "NO HEAD FOR MENTION: {}, USING FULL SPAN".format(entity_mention)
                         mention_span = (anchor2offset[entity_mention['start']],
                                         anchor2offset[entity_mention['end']])
-                    for head_mention in head_mentions:
-                        if head_mention['id'] == head_id:
-                            mention_span = (anchor2offset[head_mention['start']],
-                                            anchor2offset[head_mention['end']])
+
                 else:
                     mention_span = (anchor2offset[entity_mention['start']],
                                     anchor2offset[entity_mention['end']])
@@ -383,23 +389,54 @@ if __name__ == '__main__':
     print "Loading Spacy..."
     nlp = spacy.load('en')
 
-    text_files = glob('data/ACE 2005/data/English/*/adj/*sgm')
-    annotation_files = glob('data/ACE 2005/data/English/*/adj/*ag.xml')
+    text_files = glob('data/ACE 2005/data/English/*/timex2norm/*sgm')
+    annotation_files = glob('data/ACE 2005/data/English/*/timex2norm/*ag.xml')
+
+    # load in the fnames from the Li/Miwa's splits
+    train_set = set(open('data/ACE 2005/splits/train.txt', 'r').read().split())
+    dev_set = set(open('data/ACE 2005/splits/dev.txt', 'r').read().split())
+    test_set = set(open('data/ACE 2005/splits/test.txt', 'r').read().split())
+
     n = len(text_files)
 
-    all_annotations = {}
+    train_annotations = {}
+    dev_annotations = {}
+    test_annotations = {}
+
     start = time()
     for doc_i, (text_f, ann_f) in enumerate(zip(text_files, annotation_files)):
         print '\rExtracting Document {} / {} : {}'.format(doc_i, n, "/".join(ann_f.split('/')[-3:]))
         doc_id, text, tokens, nodes, edges = extract_doc(text_f, ann_f, nlp)
-        all_annotations[doc_id] = {'text':text,
-                                   'tokens':tokens,
-                                   'annotations':nodes+edges}
+        fname = ann_f.split('/')[-1][:-7]
+        # print ann_f, fname
+        if fname in train_set:
+            train_annotations[doc_id] = {'text':text,
+                                       'tokens':tokens,
+                                       'annotations':nodes+edges}
+        elif fname in dev_set:
+            dev_annotations[doc_id] = {'text':text,
+                                       'tokens':tokens,
+                                       'annotations':nodes+edges}
+        elif fname in test_set:
+            test_annotations[doc_id] = {'text':text,
+                                       'tokens':tokens,
+                                       'annotations':nodes+edges}
+        else:
+            continue
 
     total = time() - start
     print "Avg {} sec / doc".format(total/float(n))
     # data_f = 'data/ace_05_yaat.json'
-    data_f = 'data/ace_05_head_yaat.json'
+
+    data_f = 'data/ace_05_head_yaat_train.json'
     print "Writing out data to {}".format(data_f)
     with open(data_f, 'w', encoding='utf8') as outfile:
-        outfile.write(unicode(json.dumps(all_annotations, ensure_ascii=False, indent=2)))
+        outfile.write(unicode(json.dumps(train_annotations, ensure_ascii=False, indent=2)))
+    data_f = 'data/ace_05_head_yaat_dev.json'
+    print "Writing out data to {}".format(data_f)
+    with open(data_f, 'w', encoding='utf8') as outfile:
+        outfile.write(unicode(json.dumps(dev_annotations, ensure_ascii=False, indent=2)))
+    data_f = 'data/ace_05_head_yaat_test.json'
+    print "Writing out data to {}".format(data_f)
+    with open(data_f, 'w', encoding='utf8') as outfile:
+        outfile.write(unicode(json.dumps(test_annotations, ensure_ascii=False, indent=2)))

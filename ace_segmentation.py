@@ -17,18 +17,21 @@ from infonet.util import (convert_sequences, sequences2arrays,
 from infonet.tagger import Tagger, TaggerLoss
 from infonet.evaluation import plot_learning_curve, mention_boundary_stats
 
-def get_ace_segmentation_data(fname, count, valid, test, **kwds):
+def get_ace_segmentation_data(count, **kwds):
     print "Loading data..."
     # load data
-    data = json.loads(io.open(fname, 'r').read())
+    train_data = json.loads(io.open('data/ace_05_head_yaat_train.json', 'r').read())
+    dev_data = json.loads(io.open('data/ace_05_head_yaat_dev.json', 'r').read())
+    test_data = json.loads(io.open('data/ace_05_head_yaat_test.json', 'r').read())
+    all_data_values = train_data.values() + dev_data.values() + test_data.values()
 
     # get vocabs
     token_vocab = Vocab(min_count=count)
-    for doc in data.values():
+    for doc in all_data_values:
         token_vocab.add(doc['tokens'])
 
     boundary_vocab = Vocab(min_count=0)
-    for doc in data.values():
+    for doc in all_data_values:
         doc['annotations'] = resolve_annotations(doc['annotations'])
         doc['boundary_labels'] = compute_flat_mention_labels(doc, typed_BIO_map)
         boundary_vocab.add(doc['boundary_labels'])
@@ -38,50 +41,42 @@ def get_ace_segmentation_data(fname, count, valid, test, **kwds):
     tag_map = compute_tag_map(boundary_vocab)
 
     # create datasets
-    xy = [(doc['tokens'], doc['boundary_labels']) for doc in data.values()]
-    npr.shuffle(xy)
-    test = 1-test # eg, .1 -> .9
-    valid = test-valid # eg, .1 -> .9
-    valid_split = int(len(xy)*valid)
-    test_split = int(len(xy)*test)
-    xy_train, xy_valid, xy_test = xy[:valid_split], xy[valid_split:test_split], xy[test_split:]
+    x_train = [ doc['tokens'] for doc in train_data.values() ]
+    x_dev = [ doc['tokens'] for doc in dev_data.values() ]
+    x_test = [ doc['tokens'] for doc in test_data.values() ]
+    b_train = [ doc['boundary_labels'] for doc in train_data.values() ]
+    b_dev = [ doc['boundary_labels'] for doc in dev_data.values() ]
+    b_test = [ doc['boundary_labels'] for doc in test_data.values() ]
+    print '{} train, {} dev, and {} test documents'.format(len(x_train), len(x_dev), len(x_test))
 
-    x_train = [d[0] for d in xy_train]
-    y_train = [d[1] for d in xy_train]
-    x_valid = [d[0] for d in xy_valid]
-    y_valid = [d[1] for d in xy_valid]
-    x_test = [d[0] for d in xy_test]
-    y_test = [d[1] for d in xy_test]
-    print '{} train, {} validation, and {} test documents'.format(len(x_train), len(x_valid), len(x_test))
-
-    dataset = { 'data':data,
-                'token_vocab':token_vocab,
+    dataset = { 'token_vocab':token_vocab,
                 'boundary_vocab':boundary_vocab,
                 'tag_map':tag_map,
                 'x_train':x_train,
-                'y_train':y_train,
-                'x_valid':x_valid,
-                'y_valid':y_valid,
+                'b_train':b_train,
+                'x_dev':x_dev,
+                'b_dev':b_dev,
                 'x_test':x_test,
-                'y_test':y_test }
+                'b_test':b_test }
     return dataset
 
-def train(dataset,
+def train(dataset, STATS, model_name,
           batch_size, n_epoch, wait,
           embedding_size, lstm_size, learning_rate,
           crf_type, dropout,
-          model_fname, plot_fname, eval_only=False,
+          eval_only=False,
+          plot_fit_curve=False,
           **kwds):
     # unpack dataset
     token_vocab = dataset['token_vocab']
     boundary_vocab = dataset['boundary_vocab']
     tag_map = dataset['tag_map']
     x_train = dataset['x_train']
-    x_valid = dataset['x_valid']
+    x_dev = dataset['x_dev']
     x_test = dataset['x_test']
-    y_train = dataset['y_train']
-    y_valid = dataset['y_valid']
-    y_test = dataset['y_test']
+    b_train = dataset['b_train']
+    b_dev = dataset['b_dev']
+    b_test = dataset['b_test']
 
     # convert dataset to idxs
     # before we do conversions, we need to drop infrequent words from the vocab and reindex it
@@ -90,15 +85,15 @@ def train(dataset,
     boundary_vocab.drop_infrequent()
 
     ix_train = convert_sequences(x_train, token_vocab.idx)
-    ix_valid = convert_sequences(x_valid, token_vocab.idx)
+    ix_dev = convert_sequences(x_dev, token_vocab.idx)
     ix_test = convert_sequences(x_test, token_vocab.idx)
-    iy_train = convert_sequences(y_train, boundary_vocab.idx)
-    iy_valid = convert_sequences(y_valid, boundary_vocab.idx)
-    iy_test = convert_sequences(y_test, boundary_vocab.idx)
+    ib_train = convert_sequences(b_train, boundary_vocab.idx)
+    ib_dev = convert_sequences(b_dev, boundary_vocab.idx)
+    ib_test = convert_sequences(b_test, boundary_vocab.idx)
 
     # data
-    train_iter = SequenceIterator(zip(ix_train, iy_train), batch_size, repeat=True)
-    valid_iter = SequenceIterator(zip(ix_valid, iy_valid), batch_size, repeat=True)
+    train_iter = SequenceIterator(zip(ix_train, ib_train), batch_size, repeat=True)
+    dev_iter = SequenceIterator(zip(ix_dev, ib_dev), batch_size, repeat=True)
 
     # model
     embed = ch.functions.EmbedID(token_vocab.v, embedding_size)
@@ -113,28 +108,28 @@ def train(dataset,
     if not eval_only:
         # training
         # n_epoch = 50
-        best_valid_loss = 1e50
-        n_valid_up = 0
+        best_dev_loss = 1e50
+        n_dev_up = 0
         epoch_losses = [[]]
-        valid_losses = []
+        dev_losses = []
         forward_times = [[]]
         backward_times = [[]]
         seq_lengths = [[]]
         fit_start = time.time()
         for batch in train_iter:
             # prepare data and model
-            x_list, y_list = zip(*batch)
+            x_list, b_list = zip(*batch)
             x_list = sequences2arrays(x_list)
-            y_list = sequences2arrays(y_list)
+            b_list = sequences2arrays(b_list)
             model_loss.cleargrads()
             tagger.reset_state()
             seq_lengths[-1].append(len(x_list))
 
             # run model
             start = time.time()
-            loss = model_loss(x_list, y_list)
+            loss = model_loss(x_list, b_list)
             forward_times[-1].append(time.time()-start)
-            loss_val = loss.data
+            loss_val = np.asscalar(loss.data)
             # print_batch_loss(loss_val,
             #                  train_iter.epoch+1,
             #                  train_iter.current_position,
@@ -147,30 +142,30 @@ def train(dataset,
             optimizer.update()
             backward_times[-1].append(time.time()-start)
 
-            # validation routine
+            # devation routine
             if train_iter.is_new_epoch:
-                valid_loss = 0
-                for valid_batch in valid_iter:
-                    x_list, y_list = zip(*valid_batch)
+                dev_loss = 0
+                for dev_batch in dev_iter:
+                    x_list, b_list = zip(*dev_batch)
                     x_list = sequences2arrays(x_list)
-                    y_list = sequences2arrays(y_list)
+                    b_list = sequences2arrays(b_list)
                     tagger.reset_state()
-                    valid_loss += model_loss(x_list, y_list).data
-                    if valid_iter.is_new_epoch:
+                    dev_loss += np.asscalar(model_loss(x_list, b_list).data)
+                    if dev_iter.is_new_epoch:
                         break
                 print_epoch_loss(train_iter.epoch,
                                  np.mean(epoch_losses[-1]),
-                                 valid_loss,
+                                 dev_loss,
                                  time=np.sum(forward_times[-1]+backward_times[-1]))
-                valid_losses.append(valid_loss)
+                dev_losses.append(dev_loss)
                 # save best
-                if valid_loss < best_valid_loss:
-                    best_valid_loss = valid_loss
-                    n_valid_up = 0
-                    ch.serializers.save_npz(model_fname, tagger)
+                if dev_loss < best_dev_loss:
+                    best_dev_loss = dev_loss
+                    n_dev_up = 0
+                    ch.serializers.save_npz('experiments/'+model_name+'.model', tagger)
                 else:
-                    n_valid_up += 1
-                    if n_valid_up > wait:
+                    n_dev_up += 1
+                    if n_dev_up > wait:
                         print "Stopping early"
                         break
                 if train_iter.epoch == n_epoch:
@@ -180,55 +175,59 @@ def train(dataset,
                 forward_times.append([])
                 backward_times.append([])
 
+        fit_time = time.time()-fit_start
         print "Training finished. {} epochs in {}".format(
-              n_epoch, sec2hms(time.time()-fit_start))
-        plot_learning_curve(epoch_losses, valid_losses, savename=plot_fname)
+              n_epoch, sec2hms(fit_time))
+        if plot_fit_curve:
+            plot_learning_curve(epoch_losses, dev_losses, savename='experiments/'+model_name+'_fitcurve.pdf')
+
+        STATS['epoch_losses'] = epoch_losses
+        STATS['dev_losses'] = dev_losses
+        STATS['seq_lengths'] = seq_lengths
+        STATS['forward_times'] = forward_times
+        STATS['backward_times'] = backward_times
+        STATS['fit_time'] = fit_time
 
     # restore and evaluate
     print 'Restoring best model...',
-    ch.serializers.load_npz(model_fname, tagger)
+    ch.serializers.load_npz('experiments/'+model_name+'.model', tagger)
     print 'Done'
 
     print 'Evaluating...'
-    preds, x_list, y_list = tagger.predict(ix_train, iy_train)
+    preds, x_list, b_list = tagger.predict(ix_train, ib_train)
     preds = convert_sequences(preds, boundary_vocab.token)
     xs = convert_sequences(x_list, token_vocab.token)
-    ys = convert_sequences(y_list, boundary_vocab.token)
-    f1_stats = mention_boundary_stats(ys, preds, **tag_map)
+    bs = convert_sequences(b_list, boundary_vocab.token)
+    f1_stats = mention_boundary_stats(bs, preds, **tag_map)
+    STATS['train_stats'] = f1_stats
     print "Training:: P: {s[precision]:2.4f}, R: {s[recall]:2.4f}, F1: {s[f1]:2.4f}".format(s=f1_stats)
 
-    preds, x_list, y_list = tagger.predict(ix_test, iy_test)
+    preds, x_list, b_list = tagger.predict(ix_test, ib_test)
     preds = convert_sequences(preds, boundary_vocab.token)
     xs = convert_sequences(x_list, token_vocab.token)
-    ys = convert_sequences(y_list, boundary_vocab.token)
-    f1_stats = mention_boundary_stats(ys, preds, **tag_map)
+    bs = convert_sequences(b_list, boundary_vocab.token)
+    f1_stats = mention_boundary_stats(bs, preds, **tag_map)
+    STATS['test_stats'] = f1_stats
     print "Testing:: P: {s[precision]:2.4f}, R: {s[recall]:2.4f}, F1: {s[f1]:2.4f}".format(s=f1_stats)
 
-    print zip(xs[-1], preds[-1], ys[-1])
-    print 'Transition matrix:'
-    print ' '.join([ v for k,v in sorted(boundary_vocab._idx2vocab.items(), key=lambda x:x[0]) ])
-    if tagger.crf_type == 'simple':
-        print tagger.crf.cost.data
-    print boundary_vocab.vocabset
+    print "Dumping run stats"
+    with open('experiments/'+model_name+'_stats.json', 'w') as f:
+        f.write(json.dumps(STATS))
+
+    print "Finished Experiment"
+    # print zip(xs[-1], preds[-1], ys[-1])
+    # print 'Transition matrix:'
+    # print ' '.join([ v for k,v in sorted(boundary_vocab._idx2vocab.items(), key=lambda x:x[0]) ])
+    # if tagger.crf_type == 'simple':
+    #     print tagger.crf.cost.data
+    # print boundary_vocab.vocabset
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('-f', '--fname',
-                        default='data/ace_05_head_yaat.json',
-                        help='Relative location of data file',
-                        type=str)
     parser.add_argument('-c', '--count',
-                        default=5,
+                        default=0,
                         help='Minimum number of token count to not be UNK',
                         type=int)
-    parser.add_argument('-v', '--valid',
-                        default=.1,
-                        help='Percent of data for validation (as float < 1)',
-                        type=float)
-    parser.add_argument('-t', '--test',
-                        default=.1,
-                        help='Percent of data for testing (as float < 1)',
-                        type=float)
     parser.add_argument('-b', '--batch_size',
                         default=256,
                         help='Number of docs per minibatch',
@@ -248,14 +247,6 @@ def parse_args():
     parser.add_argument('-w', '--wait',
                         default=5,
                         help='Number of epochs to wait for early stopping')
-    parser.add_argument('-m', '--model_fname',
-                        default='best_tagger.model',
-                        help='Name of file to save best model to',
-                        type=str)
-    parser.add_argument('-p', '--plot_fname',
-                        default='learning_curve.png',
-                        help='Name of file to save learning curve plot to',
-                        type=str)
     parser.add_argument('--dropout',
                         default=.25,
                         type=float)
@@ -267,10 +258,22 @@ def parse_args():
     parser.add_argument('--eval_only', action='store_true', default=False)
     parser.add_argument('--rseed', type=int, default=42,
                         help='Sets the random seed')
+    parser.add_argument('--plot_fit_curve', action='store_true', default=False,
+                        help='Whether to plot the learning curve (needs matplotlib)')
     return parser.parse_args()
 
 if __name__ == '__main__':
+    # read input args
     args = parse_args()
     npr.seed(args.rseed)
-    dataset = get_ace_segmentation_data(**vars(args))
-    train(dataset, **vars(args))
+    arg_dict = vars(args)
+
+    # setup stats and model name
+    model_name = 'tagger_{a.embedding_size}_{a.lstm_size}_{a.crf_type}_{a.dropout}_\
+{a.n_epoch}_{a.batch_size}_{a.count}'.format(a=args)
+    STATS = {'args': arg_dict,
+             'model_name':model_name}
+
+    # run it
+    dataset = get_ace_segmentation_data(**arg_dict)
+    train(dataset, STATS=STATS, model_name=model_name, **arg_dict)
