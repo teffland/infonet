@@ -237,12 +237,11 @@ def crf1d(trans_costs, xs, ys):
         batch = x.shape[0]
         # if we have a separate cost for each sequence
         # offset each idx cost by the batch idx also
-        # else don't offset them because we don't have one for each batch
         if len(cost.shape) == 3:
-            batch_offset = Variable(np.arange(batch, dtype=y.dtype)*batch)
+            batch_offset = Variable(np.arange(batch, dtype=y.dtype)*n_label*n_label)
         else:
             batch_offset = Variable(np.zeros(batch, dtype=y.dtype))
-        cost = reshape.reshape(cost, (-1, 1)) #ravel batch x n_label x n_label
+        cost = reshape.reshape(cost, (cost.size, 1)) # ravel batch x n_label x n_label, 1
         if score.shape[0] > batch:
             y_prev, _ = split_axis.split_axis(y_prev, [batch], axis=0)
             score, score_rest = split_axis.split_axis(score, [batch], axis=0)
