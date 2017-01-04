@@ -291,8 +291,9 @@ if __name__ == '__main__':
     arg_dict = vars(args)
 
     # setup stats and model name
-    model_name = 'tagger_{a.embedding_size}_{a.lstm_size}_{a.crf_type}_{a.dropout}_\
-{a.n_epoch}_{a.batch_size}_{a.count}'.format(a=args)
+    w2v = 'w2v' if args.use_w2v else ''
+    model_name = 'tagger_{a.embedding_size}_{w2v}_{a.lstm_size}_{a.crf_type}_{a.dropout}_\
+{a.n_epoch}_{a.batch_size}_{a.count}'.format(a=args, w2v=w2v)
     STATS = {'args': arg_dict,
              'model_name':model_name}
 
