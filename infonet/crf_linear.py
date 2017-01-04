@@ -10,6 +10,7 @@ Adapted from chainers CRF1d implementation
 http://docs.chainer.org/en/stable/_modules/chainer/links/loss/crf1d.html#CRF1d
 """
 import numpy as np
+import numpy.random as npr
 from chainer import link, Variable
 from chainer.functions.array import broadcast
 from chainer.functions.array import concat
@@ -42,6 +43,7 @@ class LinearChainCRF(link.Link):
             the two features t, t-1 where the matrix is restricted to be diagonal
           * 'bilinear': transition factors are calculated by a bilinear product of
             the two features t, t-1. Eg, y_{t-1}^T W_{y_{t-1}, y_t} y_t
+            NOTE: this function can be very inefficient... like 10x slower
 
     .. seealso:: :func:`~chainer.functions.crf1d` for more detail.
 
@@ -65,9 +67,9 @@ class LinearChainCRF(link.Link):
             trans_bias=(n_label**2,), # bias added to time-dependent parameterizations
             uni_cost=(n_label, n_feature),
             uni_bias=(n_label,))
-        self.trans_cost.data[...] = 0
+        self.trans_cost.data[...] = npr.uniform(size=self.trans_cost.data.shape)
         self.trans_bias.data[...] = 0
-        self.uni_cost.data[...] = 0
+        self.uni_cost.data[...] = npr.uniform(size=self.uni_cost.data.shape)
         self.uni_bias.data[...] = 0
         self.param_type = param_type
         self.n_label = n_label

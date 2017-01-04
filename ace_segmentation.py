@@ -1,6 +1,7 @@
 import json
 import io
 import time
+import os
 import argparse
 import numpy as np
 import numpy.random as npr
@@ -16,6 +17,7 @@ from infonet.util import (convert_sequences, sequences2arrays,
                           SequenceIterator, print_epoch_loss, sec2hms)
 from infonet.tagger import Tagger, TaggerLoss
 from infonet.evaluation import plot_learning_curve, mention_boundary_stats
+from infonet.word_vectors.word_vectors import get_pretrained_vectors
 
 def get_ace_segmentation_data(count, **kwds):
     print "Loading data..."
@@ -64,6 +66,7 @@ def train(dataset, STATS, model_name,
           batch_size, n_epoch, wait,
           embedding_size, lstm_size, learning_rate,
           crf_type, dropout,
+          use_w2v=False,
           eval_only=False,
           plot_fit_curve=False,
           **kwds):
@@ -95,8 +98,25 @@ def train(dataset, STATS, model_name,
     train_iter = SequenceIterator(zip(ix_train, ib_train), batch_size, repeat=True)
     dev_iter = SequenceIterator(zip(ix_dev, ib_dev), batch_size, repeat=True)
 
+    # get pretrained vectors
+    if use_w2v:
+        print "Loading pretrained embeddings...",
+        vec_fname = 'infonet/word_vectors/GoogleNews-vectors-negative300.txt'
+        trim_fname = '/'.join(vec_fname.split('/')[:-1]+['trimmed_'+vec_fname.split('/')[-1]])
+        if os.path.isfile(trim_fname):
+            print "Already trimmed..."
+            embeddings = get_pretrained_vectors(token_vocab, trim_fname, trim=False)
+        else:
+            print "Trimming..."
+            embeddings = get_pretrained_vectors(token_vocab, vec_fname, trim=True)
+        embedding_size = embeddings.shape[1]
+        print "Embedding size overwritten to {}".format(embedding_size)
+    else:
+        embeddings = None
+
     # model
-    embed = ch.functions.EmbedID(token_vocab.v, embedding_size)
+    embed = ch.functions.EmbedID(token_vocab.v, embedding_size,
+                                 initialW=embeddings)
     tagger = Tagger(embed, lstm_size, boundary_vocab.v,
                     crf_type=crf_type,
                     dropout=dropout)
@@ -240,6 +260,8 @@ def parse_args():
                         default=50,
                         help='Size of token embeddings',
                         type=int)
+    parser.add_argument('--use_w2v', action='store_true', default=False,
+                        help='Whether or not to use pretrained word vectors')
     parser.add_argument('-l', '--learning_rate',
                         default=.01,
                         help='Learning rate of Adam optimizer',
