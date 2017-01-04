@@ -239,7 +239,7 @@ def crf1d(trans_costs, xs, ys):
         # offset each idx cost by the batch idx also
         # else don't offset them because we don't have one for each batch
         if len(cost.shape) == 3:
-            batch_offset = Variable(np.range(batch, dtype=y.dtype)*batch)
+            batch_offset = Variable(np.arange(batch, dtype=y.dtype)*batch)
         else:
             batch_offset = Variable(np.zeros(batch, dtype=y.dtype))
         cost = reshape.reshape(cost, (-1, 1)) #ravel batch x n_label x n_label
