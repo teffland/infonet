@@ -236,6 +236,12 @@ def parse_args():
                         help='Whether to plot the learning curve (needs matplotlib)')
     return parser.parse_args()
 
+def name_tagger(args):
+    w2v = args.w2v_fname.split('/')[-1] if args.w2v_fname else ''
+    model_name = 'tagger_{a.embedding_size}_{a.lstm_size}_{a.crf_type}_{a.dropout}_\
+{a.n_epoch}_{a.batch_size}_{a.count}_{w2v}'.format(a=args, w2v=w2v)
+    return model_name
+
 if __name__ == '__main__':
     # read input args
     args = parse_args()
@@ -243,9 +249,7 @@ if __name__ == '__main__':
     arg_dict = vars(args)
 
     # setup stats and model name
-    w2v = args.w2v_fname.split('/')[-1] if args.w2v_fname else ''
-    model_name = 'tagger_{a.embedding_size}_{a.lstm_size}_{a.crf_type}_{a.dropout}_\
-{a.n_epoch}_{a.batch_size}_{a.count}_{w2v}'.format(a=args, w2v=w2v)
+    model_name = name_tagger(arg_dict)
     STATS = {'args': arg_dict,
              'model_name':model_name,
              'start_time':time.time()}

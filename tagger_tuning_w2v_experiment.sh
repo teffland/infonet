@@ -3,7 +3,7 @@ for lstm_size in 50 100 200
 do
   for crf_type in none simple linear simple_bilinear
   do
-    for dropout in 0.0 0.25 0.5
+    for dropout in 0.25 0.5
     do
       for learning_rate in .01 .001
       do
@@ -19,7 +19,7 @@ do
           --learning_rate $learning_rate\
           --w2v_fname data/word_vectors/$w2v_fname
           echo "========================================================="
-          
+
           # run it
           python -u ace_segmentation.py -n 1000 -b 400 \
           --lstm_size $lstm_size\
