@@ -1,4 +1,10 @@
-# all mapping schemes assume the annotation spans correspond with python indexing
+import json
+import io
+from scipy.misc import comb # to check for num relations
+
+from infonet.vocab import Vocab
+
+# NOTE: all mapping schemes assume the annotation spans correspond with python slice indexing
 # eg ann-span = [0,2] means the interval [0,2) or tokens[0:2]
 
 def Entity_BIO_map(mention_labels, annotation):
@@ -112,36 +118,6 @@ def compute_flat_mention_labels(doc, scheme_func=Entity_BIO_map):
     mentions = [ annotation for annotation in doc['annotations'] if annotation['ann-type'] == 'node' ]
     # create annotations from shortest to longest, so that largest spans overwrite smaller
     annotations = sorted(mentions, key=lambda x:x['ann-span'][1]-x['ann-span'][0])
-    # make sure there are no overlapping mentions
-    # NOTE: There are 3 overlapping mentions in the dataset
-    #   They are all due to tokenization errors for words that
-    #   are not split on '/'s, eg 'Secretary/Advisor'
-    #   Since there are only 3, we just accept and
-    #   ignore those sources of error.
-    # def is_bad_overlap(x,y):
-    #     # can't bad overlap if either boundaries are same
-    #     # case: [ )   or  [ )
-    #     #       [  )     [  )
-    #     if (x[0] == y[0]) or (x[1] == y[1]):
-    #         return False
-    #     # only check from left to right
-    #     l, r = (x,y) if x[0] < y[0] else (y,x)
-    #     # case [  )    (what we're looking for)
-    #     #        [  )
-    #     if l[1] > r[0] and l[1] < r[1]:
-    #         return True
-    #     # case [   )  (true nesting is ok)
-    #     #        [)
-    #     else:
-    #         return False
-
-    # for i, a in enumerate(annotations):
-    #     for b in annotations[i+1:]:
-    #         assert not is_bad_overlap(a['ann-span'], b['ann-span']), (a,b)
-    # assert not any([ is_bad_overlap(a['ann-span'], b['ann-span'])
-    #                  for i, a in enumerate(annotations)
-    #                  for b in annotations[i+1:] ])
-
     for annotation in annotations:
         mention_labels = scheme_func(mention_labels, annotation)
     return mention_labels
@@ -226,3 +202,92 @@ def resolve_annotations(annotations):
             if ann['ann-left'] in node_id_set and ann['ann-right'] in node_id_set:
                 resolved_annotations.append(ann)
     return resolved_annotations
+
+def get_ace_extraction_data(count, **kwds):
+    print "Loading data..."
+    # load data
+    train_data = json.loads(io.open('data/ace_05_head_yaat_train.json', 'r').read())
+    dev_data = json.loads(io.open('data/ace_05_head_yaat_dev.json', 'r').read())
+    test_data = json.loads(io.open('data/ace_05_head_yaat_test.json', 'r').read())
+    all_data_values = train_data.values() + dev_data.values() + test_data.values()
+
+    # get vocabs, and generate info network annotations
+    token_vocab = Vocab(min_count=count)
+    boundary_vocab = Vocab(min_count=0)
+    mention_vocab = Vocab(min_count=0)
+    relation_vocab = Vocab(min_count=0)
+    for doc in all_data_values:
+        token_vocab.add(doc['tokens'])
+
+        # dedupe and remove nestings/overlaps
+        doc['annotations'] = resolve_annotations(doc['annotations'])
+
+        # boundary labels
+        doc['boundary_labels'] = compute_flat_mention_labels(doc, typed_BIO_map)
+        boundary_vocab.add(doc['boundary_labels'])
+
+        # mention labels
+        doc['mentions'] = compute_mentions(doc)
+        mention_vocab.add([m[2] for m in doc['mentions']])
+
+        # relation labels
+        relations = compute_relations(doc)
+        # print '{} mentions, {} relations'.format(len(doc['mentions']), len(relations))
+
+        # add in NULL relations for all mention pairs that don't have a relation
+        rel_mentions = set([ r[:4] for r in relations])
+        seen_mentions = set()
+        n_null, n_real = 0, 0
+        for i, m1 in enumerate(doc['mentions']):
+            for m2 in doc['mentions'][i+1:]:
+                r = m1[:2] + m2[:2]
+                if r not in rel_mentions:
+                    relations.append(r+(u'--NULL--',))
+                    n_null += 1
+                else:
+                    n_real += 1
+                    seen_mentions |= set([r])
+        assert n_real+n_null == int(comb(len(doc['mentions']), 2)),\
+                "There should always be m choose 2 relations"
+        doc['relations'] = relations
+        relation_vocab.add([r[4] for r in doc['relations']])
+
+    # print boundary_vocab.vocabset
+
+    # compute the typing stats for extract all mentions
+    tag_map = compute_tag_map(boundary_vocab)
+
+    # create datasets
+    x_train = [ doc['tokens'] for doc in train_data.values() ]
+    x_dev = [ doc['tokens'] for doc in dev_data.values() ]
+    x_test = [ doc['tokens'] for doc in test_data.values() ]
+    b_train = [ doc['boundary_labels'] for doc in train_data.values() ]
+    b_dev = [ doc['boundary_labels'] for doc in dev_data.values() ]
+    b_test = [ doc['boundary_labels'] for doc in test_data.values() ]
+    m_train = [ doc['mentions'] for doc in train_data.values() ]
+    m_dev = [ doc['mentions'] for doc in dev_data.values() ]
+    m_test = [ doc['mentions'] for doc in test_data.values() ]
+    r_train = [ doc['relations'] for doc in train_data.values() ]
+    r_dev = [ doc['relations'] for doc in dev_data.values() ]
+    r_test = [ doc['relations'] for doc in test_data.values() ]
+    print '{} train, {} dev, and {} test documents'.format(len(x_train), len(x_dev), len(x_test))
+
+    dataset = { 'token_vocab':token_vocab,
+                'boundary_vocab':boundary_vocab,
+                'mention_vocab':mention_vocab,
+                'relation_vocab':relation_vocab,
+                'tag_map':tag_map,
+                'x_train':x_train,
+                'b_train':b_train,
+                'm_train':m_train,
+                'r_train':r_train,
+                'x_dev':x_dev,
+                'b_dev':b_dev,
+                'm_dev':m_dev,
+                'r_dev':r_dev,
+                'x_test':x_test,
+                'b_test':b_test,
+                'm_test':m_test,
+                'r_test':r_test
+            }
+    return dataset

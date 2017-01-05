@@ -8,65 +8,18 @@ import numpy.random as npr
 import chainer as ch
 
 from infonet.vocab import Vocab
-from infonet.preprocess import (Entity_BIO_map, Entity_BILOU_map,
-                                BIO_map, BILOU_map,
-                                typed_BIO_map, typed_BILOU_map,
-                                compute_flat_mention_labels,
-                                compute_tag_map, resolve_annotations)
+from infonet.preprocess import get_ace_extraction_data
 from infonet.util import (convert_sequences, sequences2arrays,
                           SequenceIterator, print_epoch_loss, sec2hms)
 from infonet.tagger import Tagger, TaggerLoss
 from infonet.evaluation import plot_learning_curve, mention_boundary_stats
-from infonet.word_vectors.word_vectors import get_pretrained_vectors
-
-def get_ace_segmentation_data(count, **kwds):
-    print "Loading data..."
-    # load data
-    train_data = json.loads(io.open('data/ace_05_head_yaat_train.json', 'r').read())
-    dev_data = json.loads(io.open('data/ace_05_head_yaat_dev.json', 'r').read())
-    test_data = json.loads(io.open('data/ace_05_head_yaat_test.json', 'r').read())
-    all_data_values = train_data.values() + dev_data.values() + test_data.values()
-
-    # get vocabs
-    token_vocab = Vocab(min_count=count)
-    for doc in all_data_values:
-        token_vocab.add(doc['tokens'])
-
-    boundary_vocab = Vocab(min_count=0)
-    for doc in all_data_values:
-        doc['annotations'] = resolve_annotations(doc['annotations'])
-        doc['boundary_labels'] = compute_flat_mention_labels(doc, typed_BIO_map)
-        boundary_vocab.add(doc['boundary_labels'])
-    print boundary_vocab.vocabset
-
-    # compute the typing stats for extract all mentions
-    tag_map = compute_tag_map(boundary_vocab)
-
-    # create datasets
-    x_train = [ doc['tokens'] for doc in train_data.values() ]
-    x_dev = [ doc['tokens'] for doc in dev_data.values() ]
-    x_test = [ doc['tokens'] for doc in test_data.values() ]
-    b_train = [ doc['boundary_labels'] for doc in train_data.values() ]
-    b_dev = [ doc['boundary_labels'] for doc in dev_data.values() ]
-    b_test = [ doc['boundary_labels'] for doc in test_data.values() ]
-    print '{} train, {} dev, and {} test documents'.format(len(x_train), len(x_dev), len(x_test))
-
-    dataset = { 'token_vocab':token_vocab,
-                'boundary_vocab':boundary_vocab,
-                'tag_map':tag_map,
-                'x_train':x_train,
-                'b_train':b_train,
-                'x_dev':x_dev,
-                'b_dev':b_dev,
-                'x_test':x_test,
-                'b_test':b_test }
-    return dataset
+from infonet.word_vectors import get_pretrained_vectors
 
 def train(dataset, STATS, model_name,
           batch_size, n_epoch, wait,
           embedding_size, lstm_size, learning_rate,
           crf_type, dropout,
-          use_w2v=False,
+          w2v_fname='',
           eval_only=False,
           plot_fit_curve=False,
           **kwds):
@@ -99,16 +52,15 @@ def train(dataset, STATS, model_name,
     dev_iter = SequenceIterator(zip(ix_dev, ib_dev), batch_size, repeat=True)
 
     # get pretrained vectors
-    if use_w2v:
+    if w2v_fname:
         print "Loading pretrained embeddings...",
-        vec_fname = 'infonet/word_vectors/GoogleNews-vectors-negative300.txt'
-        trim_fname = '/'.join(vec_fname.split('/')[:-1]+['trimmed_'+vec_fname.split('/')[-1]])
+        trim_fname = '/'.join(w2v_fname.split('/')[:-1]+['trimmed_'+w2v_fname.split('/')[-1]])
         if os.path.isfile(trim_fname):
             print "Already trimmed..."
             embeddings = get_pretrained_vectors(token_vocab, trim_fname, trim=False)
         else:
             print "Trimming..."
-            embeddings = get_pretrained_vectors(token_vocab, vec_fname, trim=True)
+            embeddings = get_pretrained_vectors(token_vocab, w2v_fname, trim=True)
         embedding_size = embeddings.shape[1]
         print "Embedding size overwritten to {}".format(embedding_size)
     else:
@@ -260,8 +212,8 @@ def parse_args():
                         default=50,
                         help='Size of token embeddings',
                         type=int)
-    parser.add_argument('--use_w2v', action='store_true', default=False,
-                        help='Whether or not to use pretrained word vectors')
+    parser.add_argument('--w2v_fname', type=str, default='',
+                        help='Location of word vectors file')
     parser.add_argument('-l', '--learning_rate',
                         default=.01,
                         help='Learning rate of Adam optimizer',
@@ -291,12 +243,12 @@ if __name__ == '__main__':
     arg_dict = vars(args)
 
     # setup stats and model name
-    w2v = 'w2v' if args.use_w2v else ''
-    model_name = 'tagger_{a.embedding_size}_{w2v}_{a.lstm_size}_{a.crf_type}_{a.dropout}_\
-{a.n_epoch}_{a.batch_size}_{a.count}'.format(a=args, w2v=w2v)
+    w2v = args.w2v_fname.split('/')[-1] if args.w2v_fname else ''
+    model_name = 'tagger_{a.embedding_size}_{a.lstm_size}_{a.crf_type}_{a.dropout}_\
+{a.n_epoch}_{a.batch_size}_{a.count}_{w2v}'.format(a=args, w2v=w2v)
     STATS = {'args': arg_dict,
              'model_name':model_name}
 
     # run it
-    dataset = get_ace_segmentation_data(**arg_dict)
+    dataset = get_ace_extraction_data(**arg_dict)
     train(dataset, STATS=STATS, model_name=model_name, **arg_dict)

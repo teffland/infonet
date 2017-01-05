@@ -6,9 +6,9 @@ class Tagger(ch.Chain):
     def __init__(self, embed, lstm_size, out_size,
                  dropout=.25,
                  crf_type='none'):
-        if crf_type == 'none':
+        if crf_type in 'none':
             self.crf_type = None
-            crf_type = 'simple' # it'll still be unused
+            crf_type = 'simple' # it won't actually be used
         else:
             self.crf_type = crf_type
         super(Tagger, self).__init__(
