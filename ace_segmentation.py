@@ -249,7 +249,7 @@ if __name__ == '__main__':
     arg_dict = vars(args)
 
     # setup stats and model name
-    model_name = name_tagger(arg_dict)
+    model_name = name_tagger(args)
     STATS = {'args': arg_dict,
              'model_name':model_name,
              'start_time':time.time()}

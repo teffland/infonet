@@ -16,12 +16,13 @@ from infonet.tagger import Tagger, TaggerLoss
 from infonet.extractor import Extractor, ExtractorLoss
 from infonet.evaluation import plot_learning_curve, mention_boundary_stats
 
-def train(dataset,
+def train(STATS, model_name,
+          dataset, tagger,
           batch_size, n_epoch, wait,
-          embedding_size, lstm_size, learning_rate,
-          use_crf, dropout,
-          model_fname, plot_fname, eval_only=False,
+          lstm_size, learning_rate, dropout,
+          eval_only=False,
           max_dist=500,
+          plot_fit_curve=False,
           **kwds):
     # unpack dataset
     token_vocab = dataset['token_vocab']
@@ -73,13 +74,6 @@ def train(dataset,
     dev_iter = SequenceIterator(zip(ix_dev, ib_dev, im_dev, ir_dev), batch_size, repeat=True)
 
     # model
-    embed = ch.functions.EmbedID(token_vocab.v, embedding_size)
-    tagger = Tagger(embed, lstm_size, boundary_vocab.v,
-                    dropout=dropout, use_crf=use_crf)
-    ch.serializers.load_npz('best_tagger.model', tagger)
-    # start_tags = [ boundary_vocab._vocab2idx[s] for s in ('B') ]
-    # in_tags = [ boundary_vocab._vocab2idx[s] for s in ('B', 'I') ]
-    # out_tags = [ boundary_vocab._vocab2idx[s] for s in ('O',) ]
     extractor = Extractor(tagger,
                           mention_vocab.v, relation_vocab.v, lstm_size=lstm_size,
                           start_tags=start_tags, in_tags=in_tags, out_tags=out_tags,
@@ -146,7 +140,7 @@ def train(dataset,
                 if dev_loss < best_dev_loss:
                     best_dev_loss = dev_loss
                     n_dev_up = 0
-                    ch.serializers.save_npz(model_fname, extractor)
+                    ch.serializers.save_npz('experiments/'+model_name+'.model', extractor)
                 else:
                     n_dev_up += 1
                     if n_dev_up > wait:
@@ -162,11 +156,19 @@ def train(dataset,
 
         print "Training finished. {} epochs in {}".format(
               n_epoch, sec2hms(time.time()-fit_start))
-        plot_learning_curve(epoch_losses, dev_losses, savename=plot_fname)
+        if plot_fit_curve:
+            plot_learning_curve(epoch_losses, dev_losses, savename='experiments/'+model_name+'_fitcurve.pdf')
+
+        STATS['epoch_losses'] = epoch_losses
+        STATS['dev_losses'] = dev_losses
+        STATS['seq_lengths'] = seq_lengths
+        STATS['forward_times'] = forward_times
+        STATS['backward_times'] = backward_times
+        STATS['fit_time'] = fit_time
 
     # restore and evaluate
     print 'Restoring best model...',
-    ch.serializers.load_npz(model_fname, extractor)
+    ch.serializers.load_npz('experiments/'+model_name+'.model', extractor)
     print 'Done'
 
     print 'Evaluating...'
@@ -224,25 +226,39 @@ def parse_args():
                              as this increases""")
     return parser.parse_args()
 
-def load_tagger(args):
+def load_dataset_and_tagger(arg_dict):
     # load in the tagger options
-    tagger_stats_f = open('experiments/{}_stats.json'.format(args.tagger, 'r'))
+    tagger_stats_f = open('experiments/{}_stats.json'.format(arg_dict['tagger'],'r'))
     tagger_args = json.load(tagger_stats_f)['args']
-    args.count = tagger_args['count']
+    arg_dict['count'] = tagger_args['count']
 
+    # load in dataset (need this to create the tagger)
+    dataset = get_ace_extraction_data(**arg_dict)
+    arg_dict['dataset'] = dataset
     # create and load the actual tagger
-    
+    embed = ch.functions.EmbedID(dataset['token_vocab'].v,
+                                 tagger_args['embedding_size'])
+    tagger = Tagger(embed, tagger_args['lstm_size'],
+                    dataset['boundary_vocab'].v,
+                    dropout=tagger_args['dropout'],
+                    crf_type=tagger_args['crf_type'])
+    ch.serializers.load_npz('experiments/{}.model'.format(arg_dict['tagger']), tagger)
+    arg_dict['tagger'] = tagger
+    return arg_dict
 
+def name_extractor(args):
+    model_name = 'extractor_{a.lstm_size}_{a.dropout}_\
+{a.n_epoch}_{a.batch_size}'.format(a=args)
+    return model_name
 
 if __name__ == '__main__':
     args = parse_args()
     npr.seed(args.rseed)
     arg_dict = vars(args)
-    dataset = get_ace_extraction_data(**arg_dict)
-
-    model_name = 'extractor_{a.lstm_size}_{a.dropout}_\
-{a.n_epoch}_{a.batch_size}_{a.count}'.format(a=args)
+    model_name = name_extractor(args)
     STATS = {'args': arg_dict,
              'model_name':model_name,
              'start_time':time.time()}
-    train(dataset, **arg_dict)
+
+    arg_dict = load_dataset_and_tagger(arg_dict)
+    train(STATS=STATS, model_name=model_name, **arg_dict)
