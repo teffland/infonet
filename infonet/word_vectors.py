@@ -32,4 +32,6 @@ def get_pretrained_vectors(vocab, vec_fname, trim=True):
     e = npr.normal(size=(vocab.v, d))
     for token, vec in token2vec.items():
         e[vocab.idx(token), :] = vec
+    print "Pretrained coverage: {0}/{1} = {2:2.2f}%".format(
+        len(token2vec), vocab.v, float(len(token2vec))/vocab.v * 100.)
     return e

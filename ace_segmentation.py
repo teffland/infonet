@@ -247,7 +247,8 @@ if __name__ == '__main__':
     model_name = 'tagger_{a.embedding_size}_{a.lstm_size}_{a.crf_type}_{a.dropout}_\
 {a.n_epoch}_{a.batch_size}_{a.count}_{w2v}'.format(a=args, w2v=w2v)
     STATS = {'args': arg_dict,
-             'model_name':model_name}
+             'model_name':model_name,
+             'start_time':time.time()}
 
     # run it
     dataset = get_ace_extraction_data(**arg_dict)
