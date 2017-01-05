@@ -12,7 +12,7 @@ from infonet.preprocess import get_ace_extraction_data
 from infonet.util import (convert_sequences, sequences2arrays,
                           SequenceIterator, print_epoch_loss, sec2hms)
 from infonet.tagger import Tagger, TaggerLoss
-from infonet.evaluation import plot_learning_curve, mention_boundary_stats
+from infonet.evaluation import mention_boundary_stats
 from infonet.word_vectors import get_pretrained_vectors
 
 def train(dataset, STATS, model_name,
@@ -21,33 +21,18 @@ def train(dataset, STATS, model_name,
           crf_type, dropout,
           w2v_fname='',
           eval_only=False,
-          plot_fit_curve=False,
           **kwds):
     # unpack dataset
     token_vocab = dataset['token_vocab']
     boundary_vocab = dataset['boundary_vocab']
     tag_map = dataset['tag_map']
-    x_train = dataset['x_train']
-    x_dev = dataset['x_dev']
-    x_test = dataset['x_test']
-    b_train = dataset['b_train']
-    b_dev = dataset['b_dev']
-    b_test = dataset['b_test']
+    ix_train = dataset['ix_train']
+    ix_dev = dataset['ix_dev']
+    ix_test = dataset['ix_test']
+    ib_train = dataset['ib_train']
+    ib_dev = dataset['ib_dev']
+    ib_test = dataset['ib_test']
 
-    # convert dataset to idxs
-    # before we do conversions, we need to drop infrequent words from the vocab and reindex it
-    print "Setting up...",
-    token_vocab.drop_infrequent()
-    boundary_vocab.drop_infrequent()
-
-    ix_train = convert_sequences(x_train, token_vocab.idx)
-    ix_dev = convert_sequences(x_dev, token_vocab.idx)
-    ix_test = convert_sequences(x_test, token_vocab.idx)
-    ib_train = convert_sequences(b_train, boundary_vocab.idx)
-    ib_dev = convert_sequences(b_dev, boundary_vocab.idx)
-    ib_test = convert_sequences(b_test, boundary_vocab.idx)
-
-    # data
     train_iter = SequenceIterator(zip(ix_train, ib_train), batch_size, repeat=True)
     dev_iter = SequenceIterator(zip(ix_dev, ib_dev), batch_size, repeat=True)
 
@@ -150,8 +135,6 @@ def train(dataset, STATS, model_name,
         fit_time = time.time()-fit_start
         print "Training finished. {} epochs in {}".format(
               n_epoch, sec2hms(fit_time))
-        if plot_fit_curve:
-            plot_learning_curve(epoch_losses, dev_losses, savename='experiments/'+model_name+'_fitcurve.pdf')
 
         STATS['epoch_losses'] = epoch_losses
         STATS['dev_losses'] = dev_losses
@@ -166,33 +149,71 @@ def train(dataset, STATS, model_name,
     print 'Done'
 
     print 'Evaluating...'
-    preds, x_list, b_list = tagger.predict(ix_train, ib_train)
-    preds = convert_sequences(preds, boundary_vocab.token)
-    xs = convert_sequences(x_list, token_vocab.token)
-    bs = convert_sequences(b_list, boundary_vocab.token)
-    f1_stats = mention_boundary_stats(bs, preds, **tag_map)
+    # eval train split
+    batch_iter = SequenceIterator(zip(ix_train, ib_train), batch_size, repeat=False)
+    try:
+        all_preds, all_xs, all_bs = [], [], []
+        for batch in batch_iter:
+            x_list, b_list = zip(*batch)
+            preds = tagger.predict(sequences2arrays(x_list))
+            preds = sequences2arrays(preds)
+            all_preds.extend(preds)
+            all_xs.extend(x_list)
+            all_bs.extend(b_list)
+    except StopIteration:
+        pass
+    all_preds = convert_sequences(all_preds, boundary_vocab.token)
+    all_xs = convert_sequences(all_xs, token_vocab.token)
+    all_bs = convert_sequences(all_bs, boundary_vocab.token)
+    f1_stats = mention_boundary_stats(all_bs, all_preds, **tag_map)
     STATS['train_stats'] = f1_stats
     print "Training:: P: {s[precision]:2.4f}, R: {s[recall]:2.4f}, F1: {s[f1]:2.4f}".format(s=f1_stats)
 
-    preds, x_list, b_list = tagger.predict(ix_test, ib_test)
-    preds = convert_sequences(preds, boundary_vocab.token)
-    xs = convert_sequences(x_list, token_vocab.token)
-    bs = convert_sequences(b_list, boundary_vocab.token)
-    f1_stats = mention_boundary_stats(bs, preds, **tag_map)
+    # eval dev split
+    batch_iter = SequenceIterator(zip(ix_dev, ib_dev), batch_size, repeat=False)
+    try:
+        all_preds, all_xs, all_bs = [], [], []
+        for batch in batch_iter:
+            x_list, b_list = zip(*batch)
+            preds = tagger.predict(sequences2arrays(x_list))
+            preds = sequences2arrays(preds)
+            all_preds.extend(preds)
+            all_xs.extend(x_list)
+            all_bs.extend(b_list)
+    except StopIteration:
+        pass
+    all_preds = convert_sequences(all_preds, boundary_vocab.token)
+    all_xs = convert_sequences(all_xs, token_vocab.token)
+    all_bs = convert_sequences(all_bs, boundary_vocab.token)
+    f1_stats = mention_boundary_stats(all_bs, all_preds, **tag_map)
+    STATS['dev_stats'] = f1_stats
+    print "Dev:: P: {s[precision]:2.4f}, R: {s[recall]:2.4f}, F1: {s[f1]:2.4f}".format(s=f1_stats)
+
+    # eval test split
+    batch_iter = SequenceIterator(zip(ix_test, ib_test), batch_size, repeat=False)
+    try:
+        all_preds, all_xs, all_bs = [], [], []
+        for batch in batch_iter:
+            x_list, b_list = zip(*batch)
+            preds = tagger.predict(sequences2arrays(x_list))
+            preds = sequences2arrays(preds)
+            all_preds.extend(preds)
+            all_xs.extend(x_list)
+            all_bs.extend(b_list)
+    except StopIteration:
+        pass
+    all_preds = convert_sequences(all_preds, boundary_vocab.token)
+    all_xs = convert_sequences(all_xs, token_vocab.token)
+    all_bs = convert_sequences(all_bs, boundary_vocab.token)
+    f1_stats = mention_boundary_stats(all_bs, all_preds, **tag_map)
     STATS['test_stats'] = f1_stats
-    print "Testing:: P: {s[precision]:2.4f}, R: {s[recall]:2.4f}, F1: {s[f1]:2.4f}".format(s=f1_stats)
+    print "Test:: P: {s[precision]:2.4f}, R: {s[recall]:2.4f}, F1: {s[f1]:2.4f}".format(s=f1_stats)
 
     print "Dumping run stats"
     with open('experiments/'+model_name+'_stats.json', 'w') as f:
         f.write(json.dumps(STATS))
 
     print "Finished Experiment"
-    # print zip(xs[-1], preds[-1], ys[-1])
-    # print 'Transition matrix:'
-    # print ' '.join([ v for k,v in sorted(boundary_vocab._idx2vocab.items(), key=lambda x:x[0]) ])
-    # if tagger.crf_type == 'simple':
-    #     print tagger.crf.cost.data
-    # print boundary_vocab.vocabset
 
 def parse_args():
     parser = argparse.ArgumentParser()

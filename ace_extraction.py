@@ -154,8 +154,9 @@ def train(STATS, model_name,
                 backward_times.append([])
 
 
+        fit_time = time.time()-fit_start
         print "Training finished. {} epochs in {}".format(
-              n_epoch, sec2hms(time.time()-fit_start))
+              n_epoch, sec2hms(fit_time))
         if plot_fit_curve:
             plot_learning_curve(epoch_losses, dev_losses, savename='experiments/'+model_name+'_fitcurve.pdf')
 
@@ -209,7 +210,7 @@ def parse_args():
                         help='Learning rate of Adam optimizer',
                         type=float)
     parser.add_argument('-w', '--wait',
-                        default=5,
+                        default=20,
                         help='Number of epochs to wait for early stopping')
     parser.add_argument('--dropout',
                         default=.25,

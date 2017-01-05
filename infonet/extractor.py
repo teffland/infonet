@@ -96,15 +96,14 @@ class Extractor(ch.Chain):
 
     def __call__(self, x_list, backprop_to_tagger=False):
         # first tag the doc
-        tagger_logits, tagger_features = self.tagger(x_list)
+        tagger_preds, tagger_features = self.tagger.predict(x_list,
+                                                            return_features=True)
         if not backprop_to_tagger:
-            for logit in tagger_logits:
-                logit.unchain_backward()
             for feature in tagger_features:
                 feature.unchain_backward()
+
+        # do another layer of features on the tagger layer
         features = [ self.lstm(f) for f in tagger_features ]
-        tagger_preds = [ ch.functions.argmax(logit, axis=1)
-                         for logit in tagger_logits ]
 
         # extract the information graph from the tagger
         mentions, l_mentions, r_mentions, m_spans, r_spans = self._extract_graph(
@@ -123,8 +122,9 @@ class Extractor(ch.Chain):
                      for r in relations ]
         return m_logits, r_logits, m_spans, r_spans
 
-    def predict(self, x_list):
-        self.reset_state()
+    def predict(self, x_list, reset_state=True):
+        if reset_state:
+            self.reset_state()
         m_logits, r_logits, m_spans, r_spans = self(x_list)
         m_preds = [ ch.functions.argmax(m, axis=1).data
                     if type(m) is ch.Variable else []
@@ -167,6 +167,7 @@ class ExtractorLoss(ch.Chain):
                     weights.append(0.0)
                     labels.append(0)
             weights = np.array(weights, dtype=np.float32)
+            print "{} / {} correct mentions".format(np.sum(weights), len(weights))
             labels = np.array(labels, dtype=np.int32)
             # print type(m_logits), len(m_logits)
             mention_loss += batch_weighted_softmax_cross_entropy(m_logits, labels,

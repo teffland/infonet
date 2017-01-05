@@ -3,6 +3,7 @@ import io
 from scipy.misc import comb # to check for num relations
 
 from infonet.vocab import Vocab
+from infonet.util import convert_sequences
 
 # NOTE: all mapping schemes assume the annotation spans correspond with python slice indexing
 # eg ann-span = [0,2] means the interval [0,2) or tokens[0:2]
@@ -270,6 +271,28 @@ def get_ace_extraction_data(count, **kwds):
     r_train = [ doc['relations'] for doc in train_data.values() ]
     r_dev = [ doc['relations'] for doc in dev_data.values() ]
     r_test = [ doc['relations'] for doc in test_data.values() ]
+
+    # before converting drop infrequents
+    token_vocab.drop_infrequent()
+    boundary_vocab.drop_infrequent()
+    mention_vocab.drop_infrequent()
+    relation_vocab.drop_infrequent()
+
+    # convert to indices in vocab
+    ix_train = convert_sequences(x_train, token_vocab.idx)
+    ix_dev = convert_sequences(x_dev, token_vocab.idx)
+    ix_test = convert_sequences(x_test, token_vocab.idx)
+    ib_train = convert_sequences(b_train, boundary_vocab.idx)
+    ib_dev = convert_sequences(b_dev, boundary_vocab.idx)
+    ib_test = convert_sequences(b_test, boundary_vocab.idx)
+    convert_mention = lambda x: x[:-1]+(mention_vocab.idx(x[-1]),) # type is last
+    im_train = convert_sequences(m_train, convert_mention)
+    im_dev = convert_sequences(m_dev, convert_mention)
+    im_test = convert_sequences(m_test, convert_mention)
+    convert_relation = lambda x: x[:-1]+(relation_vocab.idx(x[-1]),) # type is last
+    ir_train = convert_sequences(r_train, convert_relation)
+    ir_dev = convert_sequences(r_dev, convert_relation)
+    ir_test = convert_sequences(r_test, convert_relation)
     print '{} train, {} dev, and {} test documents'.format(len(x_train), len(x_dev), len(x_test))
 
     dataset = { 'token_vocab':token_vocab,
@@ -277,17 +300,17 @@ def get_ace_extraction_data(count, **kwds):
                 'mention_vocab':mention_vocab,
                 'relation_vocab':relation_vocab,
                 'tag_map':tag_map,
-                'x_train':x_train,
-                'b_train':b_train,
-                'm_train':m_train,
-                'r_train':r_train,
-                'x_dev':x_dev,
-                'b_dev':b_dev,
-                'm_dev':m_dev,
-                'r_dev':r_dev,
-                'x_test':x_test,
-                'b_test':b_test,
-                'm_test':m_test,
-                'r_test':r_test
+                'ix_train':ix_train,
+                'ib_train':ib_train,
+                'im_train':im_train,
+                'ir_train':ir_train,
+                'ix_dev':ix_dev,
+                'ib_dev':ib_dev,
+                'im_dev':im_dev,
+                'ir_dev':ir_dev,
+                'ix_test':ix_test,
+                'ib_test':ib_test,
+                'im_test':im_test,
+                'ir_test':ir_test
             }
     return dataset
