@@ -219,7 +219,7 @@ def parse_args():
                         help='Learning rate of Adam optimizer',
                         type=float)
     parser.add_argument('-w', '--wait',
-                        default=5,
+                        default=20,
                         help='Number of epochs to wait for early stopping')
     parser.add_argument('--dropout',
                         default=.25,
