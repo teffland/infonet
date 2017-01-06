@@ -19,6 +19,7 @@ def train(dataset, STATS, model_name,
           batch_size, n_epoch, wait,
           embedding_size, lstm_size, learning_rate,
           crf_type, dropout,
+          weight_decay, grad_clip,
           w2v_fname='',
           eval_only=False,
           **kwds):
@@ -35,6 +36,7 @@ def train(dataset, STATS, model_name,
 
     train_iter = SequenceIterator(zip(ix_train, ib_train), batch_size, repeat=True)
     dev_iter = SequenceIterator(zip(ix_dev, ib_dev), batch_size, repeat=True)
+    test_iter = SequenceIterator(zip(ix_test, ib_test), batch_size, repeat=True)
 
     # get pretrained vectors
     if w2v_fname:
@@ -61,15 +63,35 @@ def train(dataset, STATS, model_name,
     model_loss = TaggerLoss(tagger)
     optimizer = ch.optimizers.Adam(learning_rate)
     optimizer.setup(model_loss)
+    optimizer.add_hook(ch.optimizer.WeightDecay(weight_decay))
+    optimizer.add_hook(ch.optimizer.GradientClipping(grad_clip))
     print "Done"
+
+    # evalutation Subroutine
+    def evaluate(batch_iter):
+        all_preds, all_xs, all_bs = [], [], []
+        for batch in batch_iter:
+            x_list, b_list = zip(*batch)
+            preds = tagger.predict(sequences2arrays(x_list))
+            preds = [pred.data for pred in ch.functions.transpose_sequence(preds) ]
+            all_preds.extend(preds)
+            all_xs.extend(x_list)
+            all_bs.extend(b_list)
+            if batch_iter.is_new_epoch:
+                break
+        all_preds = convert_sequences(all_preds, boundary_vocab.token)
+        all_xs = convert_sequences(all_xs, token_vocab.token)
+        all_bs = convert_sequences(all_bs, boundary_vocab.token)
+        f1_stats = mention_boundary_stats(all_bs, all_preds, **tag_map)
+        return f1_stats
 
     if not eval_only:
         # training
         # n_epoch = 50
-        best_dev_loss = 1e50
-        n_dev_up = 0
+        best_dev_f1 = 0
+        n_dev_down = 0
         epoch_losses = [[]]
-        dev_losses = []
+        dev_f1s = []
         forward_times = [[]]
         backward_times = [[]]
         seq_lengths = [[]]
@@ -102,28 +124,20 @@ def train(dataset, STATS, model_name,
 
             # devation routine
             if train_iter.is_new_epoch:
-                dev_loss = 0
-                for dev_batch in dev_iter:
-                    x_list, b_list = zip(*dev_batch)
-                    x_list = sequences2arrays(x_list)
-                    b_list = sequences2arrays(b_list)
-                    tagger.reset_state()
-                    dev_loss += np.asscalar(model_loss(x_list, b_list).data)
-                    if dev_iter.is_new_epoch:
-                        break
+                dev_f1 = evaluate(dev_iter)['f1']
                 print_epoch_loss(train_iter.epoch,
                                  np.mean(epoch_losses[-1]),
-                                 dev_loss,
+                                 dev_f1,
                                  time=np.sum(forward_times[-1]+backward_times[-1]))
-                dev_losses.append(dev_loss)
+                dev_f1s.append(dev_f1)
                 # save best
-                if dev_loss < best_dev_loss:
-                    best_dev_loss = dev_loss
-                    n_dev_up = 0
+                if dev_f1 >= best_dev_f1:
+                    best_dev_f1 = dev_f1
+                    n_dev_down = 0
                     ch.serializers.save_npz('experiments/'+model_name+'.model', tagger)
                 else:
-                    n_dev_up += 1
-                    if n_dev_up > wait:
+                    n_dev_down += 1
+                    if n_dev_down > wait:
                         print "Stopping early"
                         break
                 if train_iter.epoch == n_epoch:
@@ -138,7 +152,7 @@ def train(dataset, STATS, model_name,
               n_epoch, sec2hms(fit_time))
 
         STATS['epoch_losses'] = epoch_losses
-        STATS['dev_losses'] = dev_losses
+        STATS['dev_f1s'] = dev_f1s
         STATS['seq_lengths'] = seq_lengths
         STATS['forward_times'] = forward_times
         STATS['backward_times'] = backward_times
@@ -150,72 +164,21 @@ def train(dataset, STATS, model_name,
     print 'Done'
 
     print 'Evaluating...'
-    # eval train split
-    batch_iter = SequenceIterator(zip(ix_train, ib_train), batch_size, repeat=False)
-    try:
-        all_preds, all_xs, all_bs = [], [], []
-        for batch in batch_iter:
-            x_list, b_list = zip(*batch)
-            preds = tagger.predict(sequences2arrays(x_list))
-            print len(preds)
-            preds = [pred.data for pred in ch.functions.transpose_sequence(preds) ]
-            print len(preds)
-            all_preds.extend(preds)
-            all_xs.extend(x_list)
-            all_bs.extend(b_list)
-    except StopIteration:
-        pass
-    all_preds = convert_sequences(all_preds, boundary_vocab.token)
-    all_xs = convert_sequences(all_xs, token_vocab.token)
-    all_bs = convert_sequences(all_bs, boundary_vocab.token)
-    f1_stats = mention_boundary_stats(all_bs, all_preds, **tag_map)
+    f1_stats = evaluate(train_iter)
     STATS['train_stats'] = f1_stats
     print "Training:: P: {s[precision]:2.4f}, R: {s[recall]:2.4f}, F1: {s[f1]:2.4f}".format(s=f1_stats)
 
-    # eval dev split
-    batch_iter = SequenceIterator(zip(ix_dev, ib_dev), batch_size, repeat=False)
-    try:
-        all_preds, all_xs, all_bs = [], [], []
-        for batch in batch_iter:
-            x_list, b_list = zip(*batch)
-            preds = tagger.predict(sequences2arrays(x_list))
-            preds = [pred.data for pred in ch.functions.transpose_sequence(preds) ]
-            all_preds.extend(preds)
-            all_xs.extend(x_list)
-            all_bs.extend(b_list)
-    except StopIteration:
-        pass
-    all_preds = convert_sequences(all_preds, boundary_vocab.token)
-    all_xs = convert_sequences(all_xs, token_vocab.token)
-    all_bs = convert_sequences(all_bs, boundary_vocab.token)
-    f1_stats = mention_boundary_stats(all_bs, all_preds, **tag_map)
+    f1_stats = evaluate(dev_iter)
     STATS['dev_stats'] = f1_stats
     print "Dev:: P: {s[precision]:2.4f}, R: {s[recall]:2.4f}, F1: {s[f1]:2.4f}".format(s=f1_stats)
 
-    # eval test split
-    batch_iter = SequenceIterator(zip(ix_test, ib_test), batch_size, repeat=False)
-    try:
-        all_preds, all_xs, all_bs = [], [], []
-        for batch in batch_iter:
-            x_list, b_list = zip(*batch)
-            preds = tagger.predict(sequences2arrays(x_list))
-            preds = [ pred.data for pred in ch.functions.transpose_sequence(preds) ]
-            all_preds.extend(preds)
-            all_xs.extend(x_list)
-            all_bs.extend(b_list)
-    except StopIteration:
-        pass
-    all_preds = convert_sequences(all_preds, boundary_vocab.token)
-    all_xs = convert_sequences(all_xs, token_vocab.token)
-    all_bs = convert_sequences(all_bs, boundary_vocab.token)
-    f1_stats = mention_boundary_stats(all_bs, all_preds, **tag_map)
+    f1_stats = evaluate(test_iter)
     STATS['test_stats'] = f1_stats
     print "Test:: P: {s[precision]:2.4f}, R: {s[recall]:2.4f}, F1: {s[f1]:2.4f}".format(s=f1_stats)
 
     print "Dumping run stats"
     with open('experiments/'+model_name+'_stats.json', 'w') as f:
         f.write(json.dumps(STATS))
-
     print "Finished Experiment"
 
 def parse_args():
@@ -251,6 +214,12 @@ def parse_args():
     parser.add_argument('--lstm_size',
                         default=50,
                         type=int)
+    parser.add_argument('--weight_decay',
+                        default=.0001,
+                        type=float)
+    parser.add_argument('--grad_clip',
+                        default=5.,
+                        type=float)
     parser.add_argument('--crf_type', type=str, default='none',
                         help='Choose from none, simple, linear, simple_bilinear, and bilinear')
     parser.add_argument('--eval_only', action='store_true', default=False)
