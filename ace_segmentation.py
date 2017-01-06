@@ -156,7 +156,9 @@ def train(dataset, STATS, model_name,
         for batch in batch_iter:
             x_list, b_list = zip(*batch)
             preds = tagger.predict(sequences2arrays(x_list))
-            preds = sequences2arrays(preds)
+            print len(preds)
+            preds = [pred.data for pred in ch.functions.transpose_sequence(preds) ]
+            print len(preds)
             all_preds.extend(preds)
             all_xs.extend(x_list)
             all_bs.extend(b_list)
@@ -176,7 +178,7 @@ def train(dataset, STATS, model_name,
         for batch in batch_iter:
             x_list, b_list = zip(*batch)
             preds = tagger.predict(sequences2arrays(x_list))
-            preds = sequences2arrays(preds)
+            preds = [pred.data for pred in ch.functions.transpose_sequence(preds) ]
             all_preds.extend(preds)
             all_xs.extend(x_list)
             all_bs.extend(b_list)
@@ -196,7 +198,7 @@ def train(dataset, STATS, model_name,
         for batch in batch_iter:
             x_list, b_list = zip(*batch)
             preds = tagger.predict(sequences2arrays(x_list))
-            preds = sequences2arrays(preds)
+            preds = [ pred.data for pred in ch.functions.transpose_sequence(preds) ]
             all_preds.extend(preds)
             all_xs.extend(x_list)
             all_bs.extend(b_list)

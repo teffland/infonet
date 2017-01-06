@@ -39,10 +39,10 @@ class Tagger(ch.Chain):
         if self.crf_type:
             features = self(x_list, train=False, return_logits=False)
             _, preds = self.crf.argmax(features)
-            preds = [ pred.data for pred in preds ]
+            # preds = [ pred.data for pred in preds ]
         else:
             logits = self(x_list, train=False, return_logits=True)
-            preds = [ ch.functions.argmax(logit, axis=1).data for logit in logits ]
+            preds = [ ch.functions.argmax(logit, axis=1) for logit in logits ]
         if return_features:
             return preds, features
         else:
