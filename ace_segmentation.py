@@ -47,6 +47,7 @@ def train(dataset, STATS, model_name,
             print "Trimming..."
             embeddings = get_pretrained_vectors(token_vocab, w2v_fname, trim=True)
         embedding_size = embeddings.shape[1]
+        STATS['args']['embedding_size'] = embedding_size
         print "Embedding size overwritten to {}".format(embedding_size)
     else:
         embeddings = None
