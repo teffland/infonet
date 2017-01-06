@@ -67,7 +67,7 @@ def train(dataset, STATS, model_name,
     optimizer.add_hook(ch.optimizer.GradientClipping(grad_clip))
     print "Done"
 
-    # evalutation Subroutine
+    # evalutation subroutine
     def evaluate(batch_iter):
         all_preds, all_xs, all_bs = [], [], []
         for batch in batch_iter:
@@ -176,8 +176,9 @@ def train(dataset, STATS, model_name,
     STATS['test_stats'] = f1_stats
     print "Test:: P: {s[precision]:2.4f}, R: {s[recall]:2.4f}, F1: {s[f1]:2.4f}".format(s=f1_stats)
 
-    print "Dumping run stats"
-    with open('experiments/'+model_name+'_stats.json', 'w') as f:
+    stats_fname = 'experiments/'+model_name+'_stats.json'
+    print "Dumping run stats to {}".format(stats_fname)
+    with open(stats_fname, 'w') as f:
         f.write(json.dumps(STATS))
     print "Finished Experiment"
 
