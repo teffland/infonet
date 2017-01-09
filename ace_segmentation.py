@@ -20,7 +20,7 @@ def train(dataset, STATS, model_name,
           embedding_size, lstm_size, learning_rate,
           crf_type, dropout,
           weight_decay, grad_clip,
-          bidirectional,
+          bidirectional, use_mlp,
           w2v_fname='',
           eval_only=False,
           **kwds):
@@ -70,7 +70,8 @@ def train(dataset, STATS, model_name,
     tagger = Tagger(embed, lstm_size, boundary_vocab.v,
                     crf_type=crf_type,
                     dropout=dropout,
-                    bidirectional=bidirectional)
+                    bidirectional=bidirectional,
+                    use_mlp=use_mlp)
     model_loss = TaggerLoss(tagger)
     optimizer = ch.optimizers.Adam(learning_rate)
     optimizer.setup(model_loss)
@@ -251,6 +252,7 @@ def parse_args():
                         default=50,
                         type=int)
     parser.add_argument('--bidirectional', action='store_true', default=False)
+    parser.add_argument('--use_mlp', action='store_true', default=False)
     parser.add_argument('--weight_decay',
                         default=.0001,
                         type=float)

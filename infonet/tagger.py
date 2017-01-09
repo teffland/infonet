@@ -8,6 +8,7 @@ from gru import GRU, BidirectionalGRU
 class Tagger(ch.Chain):
     def __init__(self, embed, lstm_size, out_size,
                  bidirectional=False,
+                 use_mlp=False,
                  dropout=.25,
                  crf_type='none'):
         # setup rnn layer
@@ -31,6 +32,7 @@ class Tagger(ch.Chain):
             lstm = lstm,
             # f_lstm = ch.links.StatefulGRU(embed.W.shape[1], lstm_size),
             # b_lstm = ch.links.StatefulGRU(embed.W.shape[1], lstm_size),
+            mlp = ch.links.Linear(feature_size, feature_size),
             out = ch.links.Linear(feature_size, out_size),
             crf = LinearChainCRF(out_size, feature_size, crf_type)
         )
@@ -39,6 +41,7 @@ class Tagger(ch.Chain):
         self.out_size = out_size
         self.dropout = dropout
         self.bidirectional = bidirectional
+        self.use_mlp = mlp
 
     def reset_state(self):
         self.lstm.reset_state()
@@ -57,6 +60,10 @@ class Tagger(ch.Chain):
         else:
             lstms = [ self.lstm(x) for x in embeds ]
         lstms = [ drop(h, self.dropout, train) for h in lstms ]
+
+        if self.use_mlp:
+            f = ch.functions.leaky_relu
+            lstms = [ drop(f(self.mlp(h)) , self.dropout, train) for h in lstms ]
 
         if return_logits: # no crf layer, so do simple logit layer
             return [ self.out(h) for h in lstms ]
