@@ -10,14 +10,19 @@ class Tagger(ch.Chain):
                  bidirectional=False,
                  use_mlp=False,
                  dropout=.25,
+                 n_layers=1,
                  crf_type='none'):
         # setup rnn layer
         if bidirectional:
             feature_size = 2*lstm_size
-            lstm = BidirectionalGRU(lstm_size, n_inputs=embed.W.shape[1])
+            lstms = [BidirectionalGRU(lstm_size, n_inputs=embed.W.shape[1])]
+            for i in range(1,n_layers):
+                lstsms.append(BidirectionalGRU(lstm_size, n_inputs=feature_size))
         else:
             feature_size = lstm_size
-            lstm = GRU(lstm_size, n_inputs=embed.W.shape[1])
+            lstms = [GRU(lstm_size, n_inputs=embed.W.shape[1])]
+            for i in range(1,n_layers):
+                lstms.append(BidirectionalGRU(lstm_size, n_inputs=feature_size))
         # setup crf layer
         if crf_type in 'none':
             self.crf_type = None
