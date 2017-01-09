@@ -252,7 +252,7 @@ def get_ace_extraction_data(count=0, **kwds):
         doc['annotations'] = resolve_annotations(doc['annotations'])
 
         # boundary labels
-        doc['boundary_labels'] = compute_flat_mention_labels(doc, typed_BIO_map)
+        doc['boundary_labels'] = compute_flat_mention_labels(doc, E_BIO_map)
         boundary_vocab.add(doc['boundary_labels'])
 
         # mention labels
