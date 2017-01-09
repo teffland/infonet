@@ -17,12 +17,13 @@ class Tagger(ch.Chain):
             feature_size = 2*lstm_size
             lstms = [BidirectionalGRU(lstm_size, n_inputs=embed.W.shape[1])]
             for i in range(1,n_layers):
-                lstsms.append(BidirectionalGRU(lstm_size, n_inputs=feature_size))
+                lstms.append(BidirectionalGRU(lstm_size, n_inputs=feature_size))
         else:
             feature_size = lstm_size
             lstms = [GRU(lstm_size, n_inputs=embed.W.shape[1])]
             for i in range(1,n_layers):
                 lstms.append(BidirectionalGRU(lstm_size, n_inputs=feature_size))
+
         # setup crf layer
         if crf_type in 'none':
             self.crf_type = None
@@ -34,13 +35,15 @@ class Tagger(ch.Chain):
             embed = embed,
             # f_lstm = ch.links.LSTM(embed.W.shape[1], lstm_size),
             # b_lstm = ch.links.LSTM(embed.W.shape[1], lstm_size),
-            lstm = lstm,
             # f_lstm = ch.links.StatefulGRU(embed.W.shape[1], lstm_size),
             # b_lstm = ch.links.StatefulGRU(embed.W.shape[1], lstm_size),
             mlp = ch.links.Linear(feature_size, feature_size),
             out = ch.links.Linear(feature_size, out_size),
             crf = LinearChainCRF(out_size, feature_size, crf_type)
         )
+        self.lstms = lstms
+        for i, lstm in enumerate(self.lstms):
+            self.add_link('lstm_{}'.format(i), lstm)
         self.lstm_size = lstm_size
         self.feature_size = feature_size
         self.out_size = out_size
@@ -49,22 +52,30 @@ class Tagger(ch.Chain):
         self.use_mlp = use_mlp
 
     def reset_state(self):
-        self.lstm.reset_state()
+        for lstm in self.lstms:
+            lstm.reset_state()
 
     def __call__(self, x_list, train=True, return_logits=False):
         drop = ch.functions.dropout
         embeds = [ drop(self.embed(x), self.dropout, train) for x in x_list ]
         if self.bidirectional:
-            f_lstms, b_lstms = [], []
-            for x_f, x_b in zip(embeds, embeds[::-1]):
-                h_f, h_b = self.lstm(x_f, x_b)
-                f_lstms.append(h_f)
-                b_lstms.append(h_b)
-            b_lstms = b_lstms[::-1]
-            lstms = [ ch.functions.hstack([f,b]) for f,b in zip(f_lstms, b_lstms)]
+            # helper function
+            def bilstm(inputs, lstm):
+                f_lstms, b_lstms = [], []
+                for x_f, x_b in zip(inputs, inputs[::-1]):
+                    h_f, h_b = lstm(x_f, x_b)
+                    f_lstms.append(h_f)
+                    b_lstms.append(h_b)
+                b_lstms = b_lstms[::-1]
+                return [ ch.functions.hstack([f,b]) for f,b in zip(f_lstms, b_lstms)]
+            # run the layers of bilstms
+            lstms = bilstm(embeds, self.lstms[0])
+            for lstm in self.lstms[1:]:
+                lstms = [ drop(h, self.dropout, train) for h in bilstm(lstms, lstm) ]
         else:
-            lstms = [ self.lstm(x) for x in embeds ]
-        lstms = [ drop(h, self.dropout, train) for h in lstms ]
+            lstms = [ self.lstms[0](x) for x in embeds ]
+            for lstm in self.lstms[1:]:
+                lstms = [ drop(lstm(h), self.dropout, train) for h in lstms ]
 
         if self.use_mlp:
             f = ch.functions.leaky_relu
