@@ -257,7 +257,7 @@ def parse_args():
                         default=.0001,
                         type=float)
     parser.add_argument('--grad_clip',
-                        default=500.,
+                        default=50.,
                         type=float)
     parser.add_argument('--crf_type', type=str, default='none',
                         help='Choose from none, simple, linear, simple_bilinear, and bilinear')
