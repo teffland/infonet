@@ -26,6 +26,15 @@ def E_BIO_map(mention_labels, annotation):
             mention_labels[left+i] = 'I-'+annotation['node-type']
     return mention_labels
 
+def NoVal_BIO_map(mention_labels, annotation):
+    """ Uses BIO scheme (typed) for entities only """
+    if annotation['node-type'] in ('entity', 'event-anchor'):
+        left, right = tuple(annotation['ann-span'])
+        mention_labels[left] = 'B'
+        for i in range(1, right-left):
+            mention_labels[left+i] = 'I'
+    return mention_labels
+
 def Entity_typed_BIO_map(mention_labels, annotation):
     """ Uses BIO scheme (typed) for entities only """
     if annotation['node-type'] == 'entity':
@@ -170,30 +179,38 @@ def compute_tag_map(boundary_vocab):
     }
     return tag_map
 
-def compute_mentions(doc, fine_grained=False):
+def compute_mentions(doc, fine_grained=False, omit_timex=True):
     """ Compute gold mentions as (*span, type) from yaat.
 
     Return them sorted lexicographicaly. """
     mentions = []
     for ann in doc['annotations']:
         if ann['ann-type'] == u'node':
+            if omit_timex and ann['node-type'] == 'value':
+                continue
             mention_type = ann['node-type']+':'+ann['type']
-            if fine_grained:
+            # always use event anchor subtypes (needed for correct roles)
+            if fine_grained or ann['node-type'] == 'event-anchor':
                 mention_type += ':'+ann['subtype']
             mentions.append((ann['ann-span'][0], ann['ann-span'][1], mention_type))
     return sorted(mentions, key=lambda x: x[:2])
 
-def compute_relations(doc, fine_grained=False):
+def compute_relations(doc, mentions):
     """ Compute gold relations as (*left_span, *right_span, type) from yaat """
     relations = []
+    mention_spans = { m[:2] for m in mentions }
     id2ann = { ann['ann-uid']:ann for ann in doc['annotations']}
     for ann in doc['annotations']:
         if ann['ann-type'] == u'edge':
-            left_span = id2ann[ann['ann-left']]['ann-span']
-            right_span = id2ann[ann['ann-right']]['ann-span']
-            rel_type = ann['edge-type']+':'+ann['type']
-            if fine_grained:
-                rel_type += ':'+ann['subtype']
+            left_span = tuple(id2ann[ann['ann-left']]['ann-span'])
+            right_span = tuple(id2ann[ann['ann-right']]['ann-span'])
+            # omit relations that we didn't include spans for
+            if left_span not in mention_spans or right_span not in mention_spans:
+                continue
+            if 'ARG' in ann['type']: # event args go by subtypes
+                rel_type = ann['edge-type']+':'+ann['type']
+            else:
+                rel_type = ann['edge-type']+':'+ann['type']
             relations.append((left_span[0], left_span[1], right_span[0], right_span[1], rel_type))
     return relations
 
@@ -252,7 +269,7 @@ def get_ace_extraction_data(count=0, **kwds):
         doc['annotations'] = resolve_annotations(doc['annotations'])
 
         # boundary labels
-        doc['boundary_labels'] = compute_flat_mention_labels(doc, E_BIO_map)
+        doc['boundary_labels'] = compute_flat_mention_labels(doc, NoVal_BIO_map)
         boundary_vocab.add(doc['boundary_labels'])
 
         # mention labels
@@ -260,7 +277,7 @@ def get_ace_extraction_data(count=0, **kwds):
         mention_vocab.add([m[2] for m in doc['mentions']])
 
         # relation labels
-        relations = compute_relations(doc)
+        relations = compute_relations(doc, doc['mentions'])
         # print '{} mentions, {} relations'.format(len(doc['mentions']), len(relations))
 
         # add in NULL relations for all mention pairs that don't have a relation
@@ -281,7 +298,17 @@ def get_ace_extraction_data(count=0, **kwds):
         doc['relations'] = relations
         relation_vocab.add([r[4] for r in doc['relations']])
 
-    # print boundary_vocab.vocabset
+    print "Boundary vocab:"
+    for i, v in enumerate(sorted(list(boundary_vocab.vocabset))):
+        print '\t{}:: {}'.format(i,v)
+
+    print "Mention vocab:"
+    for i, v in enumerate(sorted(list(mention_vocab.vocabset))):
+        print '\t{}:: {}'.format(i,v)
+
+    print "Relation vocab:"
+    for i, v in enumerate(sorted(list(relation_vocab.vocabset))):
+        print '\t{}:: {}'.format(i,v)
 
     # compute the typing stats for extract all mentions
     tag_map = compute_tag_map(boundary_vocab)
