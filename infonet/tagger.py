@@ -41,7 +41,7 @@ class Tagger(ch.Chain):
         self.out_size = out_size
         self.dropout = dropout
         self.bidirectional = bidirectional
-        self.use_mlp = mlp
+        self.use_mlp = use_mlp
 
     def reset_state(self):
         self.lstm.reset_state()
