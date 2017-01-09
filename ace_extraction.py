@@ -89,7 +89,7 @@ def train(STATS, model_name,
     def print_stats(name, f1_stats):
         print "{}:: P: {s[precision]:2.4f}, R: {s[recall]:2.4f}, F1: {s[f1]:2.4f}".format(
                 name, s=f1_stats)
-        for t,s in sorted(f1_stats.items(), key=x:x[0]):
+        for t,s in sorted(f1_stats.items(), key= lambda x:x[0]):
             if type(s) is dict:
                 print "{}:{}: P: {s[precision]:2.4f}, R: {s[recall]:2.4f}, F1: {s[f1]:2.4f}".format(
                     name, t, s=s)
