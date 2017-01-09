@@ -20,6 +20,7 @@ def train(dataset, STATS, model_name,
           embedding_size, lstm_size, learning_rate,
           crf_type, dropout,
           weight_decay, grad_clip,
+          bidirectional,
           w2v_fname='',
           eval_only=False,
           **kwds):
@@ -33,6 +34,8 @@ def train(dataset, STATS, model_name,
     ib_train = dataset['ib_train']
     ib_dev = dataset['ib_dev']
     ib_test = dataset['ib_test']
+
+    print tag_map
 
     train_iter = SequenceIterator(zip(ix_train, ib_train), batch_size, repeat=True)
     dev_iter = SequenceIterator(zip(ix_dev, ib_dev), batch_size, repeat=True)
@@ -59,7 +62,8 @@ def train(dataset, STATS, model_name,
                                  initialW=embeddings)
     tagger = Tagger(embed, lstm_size, boundary_vocab.v,
                     crf_type=crf_type,
-                    dropout=dropout)
+                    dropout=dropout,
+                    bidirectional=bidirectional)
     model_loss = TaggerLoss(tagger)
     optimizer = ch.optimizers.Adam(learning_rate)
     optimizer.setup(model_loss)
@@ -163,18 +167,29 @@ def train(dataset, STATS, model_name,
     ch.serializers.load_npz('experiments/'+model_name+'.model', tagger)
     print 'Done'
 
+    def print_stats(name, f1_stats):
+        print "{}:: P: {s[precision]:2.4f}, R: {s[recall]:2.4f}, F1: {s[f1]:2.4f}".format(
+                name, s=f1_stats)
+        for t,s in f1_stats.items():
+            if type(s) is dict:
+                print "{}:{}: P: {s[precision]:2.4f}, R: {s[recall]:2.4f}, F1: {s[f1]:2.4f}".format(
+                    name, t, s=s)
+
     print 'Evaluating...'
     f1_stats = evaluate(train_iter)
+    print_stats('Training', f1_stats)
     STATS['train_stats'] = f1_stats
-    print "Training:: P: {s[precision]:2.4f}, R: {s[recall]:2.4f}, F1: {s[f1]:2.4f}".format(s=f1_stats)
+    # print "Training:: P: {s[precision]:2.4f}, R: {s[recall]:2.4f}, F1: {s[f1]:2.4f}".format(s=f1_stats)
 
     f1_stats = evaluate(dev_iter)
+    print_stats('Dev', f1_stats)
     STATS['dev_stats'] = f1_stats
-    print "Dev:: P: {s[precision]:2.4f}, R: {s[recall]:2.4f}, F1: {s[f1]:2.4f}".format(s=f1_stats)
+    # print "Dev:: P: {s[precision]:2.4f}, R: {s[recall]:2.4f}, F1: {s[f1]:2.4f}".format(s=f1_stats)
 
     f1_stats = evaluate(test_iter)
+    print_stats('Test', f1_stats)
     STATS['test_stats'] = f1_stats
-    print "Test:: P: {s[precision]:2.4f}, R: {s[recall]:2.4f}, F1: {s[f1]:2.4f}".format(s=f1_stats)
+    # print "Test:: P: {s[precision]:2.4f}, R: {s[recall]:2.4f}, F1: {s[f1]:2.4f}".format(s=f1_stats)
 
     stats_fname = 'experiments/'+model_name+'_stats.json'
     print "Dumping run stats to {}".format(stats_fname)
@@ -215,25 +230,25 @@ def parse_args():
     parser.add_argument('--lstm_size',
                         default=50,
                         type=int)
+    parser.add_argument('--bidirectional', action='store_true', default=False)
     parser.add_argument('--weight_decay',
                         default=.0001,
                         type=float)
     parser.add_argument('--grad_clip',
-                        default=5.,
+                        default=500.,
                         type=float)
     parser.add_argument('--crf_type', type=str, default='none',
                         help='Choose from none, simple, linear, simple_bilinear, and bilinear')
     parser.add_argument('--eval_only', action='store_true', default=False)
     parser.add_argument('--rseed', type=int, default=42,
                         help='Sets the random seed')
-    parser.add_argument('--plot_fit_curve', action='store_true', default=False,
-                        help='Whether to plot the learning curve (needs matplotlib)')
     return parser.parse_args()
 
 def name_tagger(args):
     w2v = args.w2v_fname.split('/')[-1] if args.w2v_fname else ''
-    model_name = 'tagger_{a.embedding_size}_{a.lstm_size}_{a.crf_type}_{a.dropout}_\
-{a.n_epoch}_{a.batch_size}_{a.count}_{w2v}'.format(a=args, w2v=w2v)
+    bi = 'bi' if args.bidirectional else ''
+    model_name = 'tagger_{bi}_{a.embedding_size}_{a.lstm_size}_{a.crf_type}_{a.dropout}_\
+{a.n_epoch}_{a.batch_size}_{a.count}_{w2v}'.format(a=args, w2v=w2v, bi=bi)
     return model_name
 
 if __name__ == '__main__':

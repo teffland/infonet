@@ -37,12 +37,23 @@ def mention_precision_recall(true_mentions, pred_mentions):
     which are necessary for calculating precision and recall.
     A mention boundary is considered correct if both ends are correct.
     """
+    typeset = set([m[2] for m in true_mentions+pred_mentions])
     true_mentions = set(true_mentions)
     pred_mentions = set(pred_mentions)
-    tp = len(true_mentions & pred_mentions)
-    fn = len(true_mentions - pred_mentions)
-    fp = len(pred_mentions - true_mentions)
-    return tp, fp, fn
+    stats = dict(
+        tp = len(true_mentions & pred_mentions),
+        fn = len(true_mentions - pred_mentions),
+        fp = len(pred_mentions - true_mentions)
+    )
+    for t in typeset:
+        trues = { m for m in true_mentions if m[2] == t }
+        preds = { m for m in pred_mentions if m[2] == t }
+        stats[t] = dict(
+            tp = len(trues & preds),
+            fn = len(trues - preds),
+            fp = len(preds - trues)
+        )
+    return stats
 
 def mention_boundary_stats(true_ys, pred_ys, **kwds):
     """ Calculates the precision/recall of mention boundaries
@@ -50,15 +61,36 @@ def mention_boundary_stats(true_ys, pred_ys, **kwds):
     """
     all_true_mentions = extract_all_mentions(true_ys, **kwds)
     all_pred_mentions = extract_all_mentions(pred_ys, **kwds)
+    typeset = { m[2] for seq_mentions in all_true_mentions+all_pred_mentions
+                     for m in seq_mentions }
+    print typeset
+    for t in typeset:
+        print t, len({m for seq_mentions in all_true_mentions+all_pred_mentions
+                        for m in seq_mentions if m[2] == t})
     stats = {'tp':0,
              'fp':0,
              'fn':0}
+    for t in typeset:
+        stats[t] = {'tp':0,
+                    'fp':0,
+                    'fn':0}
     for true_mentions, pred_mentions in zip(all_true_mentions, all_pred_mentions):
-        tp, fp, fn = mention_precision_recall(true_mentions, pred_mentions)
-        stats['tp'] += tp
-        stats['fp'] += fp
-        stats['fn'] += fn
-    stats['precision'] = tp / float(tp + fp +1e-15)
-    stats['recall'] = tp / float(tp + fn +1e-15)
+        s = mention_precision_recall(true_mentions, pred_mentions)
+        stats['tp'] += s['tp']
+        stats['fp'] += s['fp']
+        stats['fn'] += s['fn']
+        for t in typeset:
+            if t in s:
+                stats[t]['tp'] += s[t]['tp']
+                stats[t]['fp'] += s[t]['fp']
+                stats[t]['fn'] += s[t]['fn']
+
+    stats['precision'] = stats['tp'] / float(stats['tp'] + stats['fp'] +1e-15)
+    stats['recall'] = stats['tp'] / float(stats['tp'] + stats['fn'] +1e-15)
     stats['f1'] = 2*stats['precision']*stats['recall']/(stats['precision']+stats['recall']+1e-15)
+    for t in typeset:
+        stats[t]['precision'] = stats[t]['tp'] / float(stats[t]['tp'] + stats[t]['fp'] +1e-15)
+        stats[t]['recall'] = stats[t]['tp'] / float(stats[t]['tp'] + stats[t]['fn'] +1e-15)
+        stats[t]['f1'] = (2*stats[t]['precision']*stats[t]['recall']/
+                         (stats[t]['precision']+stats[t]['recall']+1e-15))
     return stats

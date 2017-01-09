@@ -204,7 +204,7 @@ def resolve_annotations(annotations):
                 resolved_annotations.append(ann)
     return resolved_annotations
 
-def get_ace_extraction_data(count, **kwds):
+def get_ace_extraction_data(count=0, **kwds):
     print "Loading data..."
     # load data
     train_data = json.loads(io.open('data/ace_05_head_yaat_train.json', 'r').read())
@@ -300,6 +300,18 @@ def get_ace_extraction_data(count, **kwds):
                 'mention_vocab':mention_vocab,
                 'relation_vocab':relation_vocab,
                 'tag_map':tag_map,
+                'x_train':x_train,
+                'b_train':b_train,
+                'm_train':m_train,
+                'r_train':r_train,
+                'x_dev':x_dev,
+                'b_dev':b_dev,
+                'm_dev':m_dev,
+                'r_dev':r_dev,
+                'x_test':x_test,
+                'b_test':b_test,
+                'm_test':m_test,
+                'r_test':r_test,
                 'ix_train':ix_train,
                 'ib_train':ib_train,
                 'im_train':im_train,

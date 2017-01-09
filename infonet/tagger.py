@@ -4,31 +4,46 @@ from crf_linear import LinearChainCRF
 
 class Tagger(ch.Chain):
     def __init__(self, embed, lstm_size, out_size,
+                 bidirectional=False,
                  dropout=.25,
                  crf_type='none'):
+        feature_size = 2*lstm_size if bidirectional else lstm_size
         if crf_type in 'none':
             self.crf_type = None
             crf_type = 'simple' # it won't actually be used
         else:
             self.crf_type = crf_type
+
         super(Tagger, self).__init__(
             embed = embed,
-            lstm = ch.links.LSTM(embed.W.shape[1], lstm_size),
-            out = ch.links.Linear(lstm_size, out_size),
-            crf = LinearChainCRF(out_size, lstm_size, crf_type)
+            f_lstm = ch.links.LSTM(embed.W.shape[1], lstm_size),
+            b_lstm = ch.links.LSTM(embed.W.shape[1], lstm_size),
+            # f_lstm = ch.links.StatefulGRU(embed.W.shape[1], lstm_size),
+            # b_lstm = ch.links.StatefulGRU(embed.W.shape[1], lstm_size),
+            out = ch.links.Linear(feature_size, out_size),
+            crf = LinearChainCRF(out_size, feature_size, crf_type)
         )
         self.lstm_size = lstm_size
+        self.feature_size = feature_size
         self.out_size = out_size
         self.dropout = dropout
+        self.bidirectional = bidirectional
 
     def reset_state(self):
-        self.lstm.reset_state()
+        self.f_lstm.reset_state()
+        if self.bidirectional:
+            self.b_lstm.reset_state()
 
     def __call__(self, x_list, train=True, return_logits=False):
         drop = ch.functions.dropout
         embeds = [ drop(self.embed(x), self.dropout, train) for x in x_list ]
-        lstms = [ drop(self.lstm(x), self.dropout, train) for x in embeds ]
-        if return_logits:
+        f_lstms = [ drop(self.f_lstm(x), self.dropout, train) for x in embeds ]
+        if self.bidirectional:
+            b_lstms = [ drop(self.b_lstm(x), self.dropout, train) for x in embeds[::-1] ][::-1]
+            lstms = [ ch.functions.hstack([f,b]) for f,b in zip(f_lstms, b_lstms) ]
+        else:
+            lstms = f_lstms
+        if return_logits: # no crf layer, so do simple logit layer
             return [ self.out(h) for h in lstms ]
         else:
             return lstms
