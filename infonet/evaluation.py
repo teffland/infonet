@@ -63,10 +63,10 @@ def mention_boundary_stats(true_ys, pred_ys, **kwds):
     all_pred_mentions = extract_all_mentions(pred_ys, **kwds)
     typeset = { m[2] for seq_mentions in all_true_mentions+all_pred_mentions
                      for m in seq_mentions }
-    print typeset
-    for t in typeset:
-        print t, len({m for seq_mentions in all_true_mentions+all_pred_mentions
-                        for m in seq_mentions if m[2] == t})
+    # print typeset
+    # for t in typeset:
+    #     print t, len({m for seq_mentions in all_true_mentions+all_pred_mentions
+    #                     for m in seq_mentions if m[2] == t})
     stats = {'tp':0,
              'fp':0,
              'fn':0}

@@ -35,6 +35,13 @@ def train(dataset, STATS, model_name,
     ib_dev = dataset['ib_dev']
     ib_test = dataset['ib_test']
 
+    x_train = dataset['x_train']
+    x_dev = dataset['x_dev']
+    x_test = dataset['x_test']
+    b_train = dataset['b_train']
+    b_dev = dataset['b_dev']
+    b_test = dataset['b_test']
+
     print tag_map
 
     train_iter = SequenceIterator(zip(ix_train, ib_train), batch_size, repeat=True)
@@ -89,6 +96,14 @@ def train(dataset, STATS, model_name,
         f1_stats = mention_boundary_stats(all_bs, all_preds, **tag_map)
         return f1_stats
 
+    def print_stats(name, f1_stats):
+        print "{}:: P: {s[precision]:2.4f}, R: {s[recall]:2.4f}, F1: {s[f1]:2.4f}".format(
+                name, s=f1_stats)
+        for t,s in f1_stats.items():
+            if type(s) is dict:
+                print "{}:{}: P: {s[precision]:2.4f}, R: {s[recall]:2.4f}, F1: {s[f1]:2.4f}".format(
+                    name, t, s=s)
+
     if not eval_only:
         # training
         # n_epoch = 50
@@ -96,6 +111,7 @@ def train(dataset, STATS, model_name,
         n_dev_down = 0
         epoch_losses = [[]]
         dev_f1s = []
+        dev_statss = []
         forward_times = [[]]
         backward_times = [[]]
         seq_lengths = [[]]
@@ -128,12 +144,15 @@ def train(dataset, STATS, model_name,
 
             # devation routine
             if train_iter.is_new_epoch:
-                dev_f1 = evaluate(dev_iter)['f1']
+                dev_stats = evaluate(dev_iter)
+                dev_f1 = dev_stats['f1']
                 print_epoch_loss(train_iter.epoch,
                                  np.mean(epoch_losses[-1]),
                                  dev_f1,
                                  time=np.sum(forward_times[-1]+backward_times[-1]))
+                print_stats('Dev', dev_stats)
                 dev_f1s.append(dev_f1)
+                dev_statss.append(dev_stats)
                 # save best
                 if dev_f1 >= best_dev_f1:
                     best_dev_f1 = dev_f1
@@ -157,6 +176,7 @@ def train(dataset, STATS, model_name,
 
         STATS['epoch_losses'] = epoch_losses
         STATS['dev_f1s'] = dev_f1s
+        STATS['dev_stats'] = dev_statss
         STATS['seq_lengths'] = seq_lengths
         STATS['forward_times'] = forward_times
         STATS['backward_times'] = backward_times

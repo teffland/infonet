@@ -17,6 +17,15 @@ def Entity_BIO_map(mention_labels, annotation):
             mention_labels[left+i] = 'I'
     return mention_labels
 
+def E_BIO_map(mention_labels, annotation):
+    """ Uses BIO scheme (typed) for entities only """
+    if annotation['node-type'] in ('entity', 'event-anchor'):
+        left, right = tuple(annotation['ann-span'])
+        mention_labels[left] = 'B-'+annotation['node-type']
+        for i in range(1, right-left):
+            mention_labels[left+i] = 'I-'+annotation['node-type']
+    return mention_labels
+
 def Entity_typed_BIO_map(mention_labels, annotation):
     """ Uses BIO scheme (typed) for entities only """
     if annotation['node-type'] == 'entity':
@@ -25,6 +34,25 @@ def Entity_typed_BIO_map(mention_labels, annotation):
         mention_labels[left] = 'B-'+mention_type
         for i in range(1, right-left):
             mention_labels[left+i] = 'I-'+mention_type
+    return mention_labels
+
+def All_typed_BIO_map(mention_labels, annotation):
+    """ Uses BIO scheme (typed) for entities only """
+    mention_type = annotation['type']
+    left, right = tuple(annotation['ann-span'])
+    mention_labels[left] = 'B-'+annotation['node-type']+'-'+mention_type
+    for i in range(1, right-left):
+        mention_labels[left+i] = 'I-'+annotation['node-type']+'-'+mention_type
+    return mention_labels
+
+def E_typed_BIO_map(mention_labels, annotation):
+    """ Uses BIO scheme (typed) for entities only """
+    if annotation['node-type'] in ('entity', 'event-anchor'):
+        mention_type = annotation['type']
+        left, right = tuple(annotation['ann-span'])
+        mention_labels[left] = 'B-'+annotation['node-type']+'-'+mention_type
+        for i in range(1, right-left):
+            mention_labels[left+i] = 'I-'+annotation['node-type']+'-'+mention_type
     return mention_labels
 
 def Entity_BILOU_map(mention_labels, annotation):
@@ -134,7 +162,7 @@ def compute_tag_map(boundary_vocab):
                              if t.startswith(('B', 'U', 'I', 'L'))]),
         'out_tags':tuple([ t for t in boundary_vocab.vocabset
                              if t.startswith('O')]),
-        'type_map':{t:t.split('-')[1]
+        'type_map':{t:'-'.join(t.split('-')[1:])
                     if len(t.split('-')) > 1
                     else None
                     for t in boundary_vocab.vocabset

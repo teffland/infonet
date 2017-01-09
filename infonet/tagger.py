@@ -1,13 +1,23 @@
 import chainer as ch
 from util import SequenceIterator, sequences2arrays
 from crf_linear import LinearChainCRF
+from gru import GRU, BidirectionalGRU
+
+# import monitor
 
 class Tagger(ch.Chain):
     def __init__(self, embed, lstm_size, out_size,
                  bidirectional=False,
                  dropout=.25,
                  crf_type='none'):
-        feature_size = 2*lstm_size if bidirectional else lstm_size
+        # setup rnn layer
+        if bidirectional:
+            feature_size = 2*lstm_size
+            lstm = BidirectionalGRU(lstm_size, n_inputs=embed.W.shape[1])
+        else:
+            feature_size = lstm_size
+            lstm = GRU(lstm_size, n_inputs=embed.W.shape[1])
+        # setup crf layer
         if crf_type in 'none':
             self.crf_type = None
             crf_type = 'simple' # it won't actually be used
@@ -16,8 +26,9 @@ class Tagger(ch.Chain):
 
         super(Tagger, self).__init__(
             embed = embed,
-            f_lstm = ch.links.LSTM(embed.W.shape[1], lstm_size),
-            b_lstm = ch.links.LSTM(embed.W.shape[1], lstm_size),
+            # f_lstm = ch.links.LSTM(embed.W.shape[1], lstm_size),
+            # b_lstm = ch.links.LSTM(embed.W.shape[1], lstm_size),
+            lstm = lstm,
             # f_lstm = ch.links.StatefulGRU(embed.W.shape[1], lstm_size),
             # b_lstm = ch.links.StatefulGRU(embed.W.shape[1], lstm_size),
             out = ch.links.Linear(feature_size, out_size),
@@ -30,19 +41,23 @@ class Tagger(ch.Chain):
         self.bidirectional = bidirectional
 
     def reset_state(self):
-        self.f_lstm.reset_state()
-        if self.bidirectional:
-            self.b_lstm.reset_state()
+        self.lstm.reset_state()
 
     def __call__(self, x_list, train=True, return_logits=False):
         drop = ch.functions.dropout
         embeds = [ drop(self.embed(x), self.dropout, train) for x in x_list ]
-        f_lstms = [ drop(self.f_lstm(x), self.dropout, train) for x in embeds ]
         if self.bidirectional:
-            b_lstms = [ drop(self.b_lstm(x), self.dropout, train) for x in embeds[::-1] ][::-1]
-            lstms = [ ch.functions.hstack([f,b]) for f,b in zip(f_lstms, b_lstms) ]
+            f_lstms, b_lstms = [], []
+            for x_f, x_b in zip(embeds, embeds[::-1]):
+                h_f, h_b = self.lstm(x_f, x_b)
+                f_lstms.append(h_f)
+                b_lstms.append(h_b)
+            b_lstms = b_lstms[::-1]
+            lstms = [ ch.functions.hstack([f,b]) for f,b in zip(f_lstms, b_lstms)]
         else:
-            lstms = f_lstms
+            lstms = [ self.lstm(x) for x in embeds ]
+        lstms = [ drop(h, self.dropout, train) for h in lstms ]
+
         if return_logits: # no crf layer, so do simple logit layer
             return [ self.out(h) for h in lstms ]
         else:
