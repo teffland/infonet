@@ -94,3 +94,67 @@ def mention_boundary_stats(true_ys, pred_ys, **kwds):
         stats[t]['f1'] = (2*stats[t]['precision']*stats[t]['recall']/
                          (stats[t]['precision']+stats[t]['recall']+1e-15))
     return stats
+
+def mention_stats(m_preds, m_trues):
+    stats = {'tp':0, 'fp':0, 'fn':0}
+    for m_pred, m_true in zip(m_preds, m_trues):
+        m_pred = set(m_pred)
+        m_true = set(m_true)
+        tp = m_pred & m_true
+        fp = m_pred - m_true
+        fn = m_true - m_pred
+
+        # tp, fp, fn by type
+        stats['entity'] = {'tp':0, 'fp':0, 'fn':0}
+        stats['event'] = {'tp':0, 'fp':0, 'fn':0}
+        for m in tp:
+            m_type = m[2]
+            if m_type not in stats:
+                stats[m_type] = {'tp':0, 'fp':0, 'fn':0}
+            stats[m_type]['tp'] += 1
+            # stats by node-type
+            if 'entity' in m_type:
+                stats['entity']['tp'] += 1
+            elif 'event' in m_type:
+                stats['event']['tp'] += 1
+            else:
+                raise ValueError, "invalid m type found"
+        for m in fp:
+            if m_type not in stats:
+                stats[m_type] = {'tp':0, 'fp':0, 'fn':0}
+            stats[m_type]['fp'] += 1
+            # stats by node-type
+            if 'entity' in m_type:
+                stats['entity']['fp'] += 1
+            elif 'event' in m_type:
+                stats['event']['fp'] += 1
+            else:
+                raise ValueError, "invalid m type found"
+        for m in fn:
+            if m_type not in stats:
+                stats[m_type] = {'tp':0, 'fp':0, 'fn':0}
+            stats[m_type]['fn'] += 1
+            # stats by node-type
+            if 'entity' in m_type:
+                stats['entity']['fn'] += 1
+            elif 'event' in m_type:
+                stats['event']['fn'] += 1
+            else:
+                raise ValueError, "invalid m type found"
+
+        # tp, fp, fn regardless of type
+        stats['tp'] += len(tp)
+        stats['fp'] += len(fp)
+        stats['fn'] += len(fn)
+    # micro stats for all
+    stats['precision'] = stats['tp'] / float(stats['tp'] + stats['fp'] + 1e-15)
+    stats['recall'] = stats['tp'] / float(stats['tp'] + stats['fn'] + 1e-15)
+    stats['f1'] = 2*stats['precision']*stats['recall']/(stats['precision']+stats['recall']+1e-15)
+    # micro stats by type
+    for t, s in stats.items():
+        if type(s) is dict:
+            stats[t]['precision'] = s['tp'] / float(s['tp'] + s['fp'] + 1e-15)
+            stats[t]['recall'] = s['tp'] / float(s['tp'] + s['fn'] + 1e-15)
+            stats[t]['f1'] = (2*stats[t]['precision']*stats[t]['recall']/
+                             (stats[t]['precision']+stats[t]['recall']+1e-15))
+    return stats

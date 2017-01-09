@@ -69,11 +69,11 @@ class Tagger(ch.Chain):
                 b_lstms = b_lstms[::-1]
                 return [ ch.functions.hstack([f,b]) for f,b in zip(f_lstms, b_lstms)]
             # run the layers of bilstms
-            lstms = bilstm(embeds, self.lstms[0])
+            lstms = [ drop(h, self.dropout, train) for h in bilstm(embeds, self.lstms[0]) ]
             for lstm in self.lstms[1:]:
                 lstms = [ drop(h, self.dropout, train) for h in bilstm(lstms, lstm) ]
         else:
-            lstms = [ self.lstms[0](x) for x in embeds ]
+            lstms = [ drop(self.lstms[0](x), self.dropout, train) for x in embeds ]
             for lstm in self.lstms[1:]:
                 lstms = [ drop(lstm(h), self.dropout, train) for h in lstms ]
 

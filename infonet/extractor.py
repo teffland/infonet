@@ -4,25 +4,47 @@ import chainer as ch
 
 from tagger import extract_all_mentions
 from special_functions import batch_weighted_softmax_cross_entropy
+from gru import GRU, BidirectionalGRU
 
 class Extractor(ch.Chain):
     def __init__(self,
                  tagger,
                  n_mention_class,
                  n_relation_class,
-                 lstm_size=100,
+                 lstm_size=50,
+                 bidirectional=False,
+                 n_layers=1,
+                 use_mlp=False,
+                 dropout=.25,
                  start_tags=(2,),
                  in_tags=(1,2),
                  out_tags=(0,),
                  max_rel_dist=10000):
+        # setup rnn layer
+        if bidirectional:
+            feature_size = 2*lstm_size
+            lstms = [BidirectionalGRU(lstm_size, n_inputs=tagger.feature_size)]
+            for i in range(1,n_layers):
+                lstms.append(BidirectionalGRU(lstm_size, n_inputs=feature_size))
+        else:
+            feature_size = lstm_size
+            lstms = [GRU(lstm_size, n_inputs=tagger.feature_size)]
+            for i in range(1,n_layers):
+                lstms.append(BidirectionalGRU(lstm_size, n_inputs=feature_size))
         super(Extractor, self).__init__(
             tagger=tagger,
-            lstm = ch.links.LSTM(tagger.lstm_size, lstm_size),
-            f_m=ch.links.Linear(lstm_size, n_mention_class),
-            f_r=ch.links.Linear(2*lstm_size, n_relation_class)
+            # mlp_m = ch.links.Linear(feature_size, feature_size),
+            f_m=ch.links.Linear(feature_size, n_mention_class),
+            f_r=ch.links.Linear(2*feature_size, n_relation_class)
         )
-        # self.f_m.W.data = npr.randint((feature_size, n_mention_class))
+        self.lstms = lstms
+        for i, lstm in enumerate(self.lstms):
+            self.add_link('lstm_{}'.format(i), lstm)
         self.lstm_size = lstm_size
+        self.feature_size = feature_size
+        self.dropout = dropout
+        self.use_mlp = use_mlp # NOTE doesn't do anything right now
+        self.n_layers = n_layers
         self.start_tags = start_tags
         self.in_tags = in_tags
         self.out_tags = out_tags
@@ -30,7 +52,8 @@ class Extractor(ch.Chain):
 
     def reset_state(self):
         self.tagger.reset_state()
-        self.lstm.reset_state()
+        for lstm in self.lstms:
+            lstm.reset_state()
 
     def _extract_graph(self, tagger_preds, tagger_features):
         """ Subroutine responsible for extracting the graph and graph features
@@ -43,6 +66,7 @@ class Extractor(ch.Chain):
           which will omit all relations for mentions `max_rel_dist` apart
           (as measured from the left edge of the consituent mention spans.)
         """
+        # TODO: Possible extension: using separate features for mentions and relations
         # convert from time-major to batch-major
         tagger_preds = ch.functions.transpose_sequence(tagger_preds)
         tagger_features = ch.functions.transpose_sequence(tagger_features)
@@ -94,7 +118,7 @@ class Extractor(ch.Chain):
         return (all_mentions, all_left_mentions, all_right_mentions,
                 all_mention_spans, all_relation_spans)
 
-    def __call__(self, x_list, backprop_to_tagger=False):
+    def __call__(self, x_list, train=True, backprop_to_tagger=False):
         # first tag the doc
         tagger_preds, tagger_features = self.tagger.predict(x_list,
                                                             return_features=True)
@@ -103,12 +127,34 @@ class Extractor(ch.Chain):
                 feature.unchain_backward()
 
         # do another layer of features on the tagger layer
-        features = [ self.lstm(f) for f in tagger_features ]
+        # features = [ self.lstm(f) for f in tagger_features ]
+        if self.bidirectional:
+            # helper function
+            def bilstm(inputs, lstm):
+                f_lstms, b_lstms = [], []
+                for x_f, x_b in zip(inputs, inputs[::-1]):
+                    h_f, h_b = lstm(x_f, x_b)
+                    f_lstms.append(h_f)
+                    b_lstms.append(h_b)
+                b_lstms = b_lstms[::-1]
+                return [ ch.functions.hstack([f,b]) for f,b in zip(f_lstms, b_lstms)]
+            # run the layers of bilstms
+            lstms = [ drop(h, self.dropout, train) for h in bilstm(embeds, self.lstms[0]) ]
+            for lstm in self.lstms[1:]:
+                lstms = [ drop(h, self.dropout, train) for h in bilstm(lstms, lstm) ]
+        else:
+            lstms = [ drop(self.lstms[0](x), self.dropout, train) for x in embeds ]
+            for lstm in self.lstms[1:]:
+                lstms = [ drop(lstm(h), self.dropout, train) for h in lstms ]
+
+        # if self.use_mlp:
+        #     f = ch.functions.leaky_relu
+        #     lstms = [ drop(f(self.mlp(h)) , self.dropout, train) for h in lstms ]
 
         # extract the information graph from the tagger
         mentions, l_mentions, r_mentions, m_spans, r_spans = self._extract_graph(
             tagger_preds,
-            features)
+            lstms)
 
         # concat left and right mentions into one vector per relation
         relations = [ ch.functions.concat(m, axis=1)
@@ -140,7 +186,7 @@ class ExtractorLoss(ch.Chain):
             extractor=extractor
         )
 
-    def __call__(self, x_list, gold_b_list, gold_m_list, gold_r_list, **kwds):
+    def __call__(self, x_list, gold_m_list, gold_r_list, **kwds):
         # extract the graph
         men_logits, rel_logits, men_spans, rel_spans = self.extractor(x_list, **kwds)
         # print zip([len(m) for m in men_logits], [len(r) for r in rel_logits])
@@ -154,7 +200,12 @@ class ExtractorLoss(ch.Chain):
             # using gold mentions, construct a matching label and truth array
             # that indicates if a mention boundary prediction is correct
             # and if so the index of the correct mention type (or 0 if not)
-            # So the type loss is only calculated for correctly detected mentions
+            # So the type loss is only calculated for correctly detected mentions.
+            #
+            # To prevent degenerate solutions that force the tagger to not output
+            # as many correct mentions (resulting in trivially lower loss),
+            # we rescale the loss by (# true mentions / # correct mentions).
+            # Intuitively this creates a higher losses for less correct mentions
             gold_spans = set([m[:2] for m in gold_m])
             span2label = {m[:2]:m[2] for m in gold_m}
             weights = []
@@ -170,8 +221,10 @@ class ExtractorLoss(ch.Chain):
             print "{} / {} correct mentions".format(np.sum(weights), len(weights))
             labels = np.array(labels, dtype=np.int32)
             # print type(m_logits), len(m_logits)
-            mention_loss += batch_weighted_softmax_cross_entropy(m_logits, labels,
-                                                                 instance_weight=weights)
+            doc_mention_loss = batch_weighted_softmax_cross_entropy(m_logits, labels,
+                                                                    instance_weight=weights)
+            doc_mention_loss *= len(weights) / (np.sum(weights) + 1e-15)
+            mention_loss += doc_mention_loss
 
             # do the same for relations
             # but only if BOTH mention boundaries are correct

@@ -189,29 +189,18 @@ def train(dataset, STATS, model_name,
     ch.serializers.load_npz('experiments/'+model_name+'.model', tagger)
     print 'Done'
 
-    def print_stats(name, f1_stats):
-        print "{}:: P: {s[precision]:2.4f}, R: {s[recall]:2.4f}, F1: {s[f1]:2.4f}".format(
-                name, s=f1_stats)
-        for t,s in f1_stats.items():
-            if type(s) is dict:
-                print "{}:{}: P: {s[precision]:2.4f}, R: {s[recall]:2.4f}, F1: {s[f1]:2.4f}".format(
-                    name, t, s=s)
-
     print 'Evaluating...'
     f1_stats = evaluate(train_iter)
     print_stats('Training', f1_stats)
     STATS['train_stats'] = f1_stats
-    # print "Training:: P: {s[precision]:2.4f}, R: {s[recall]:2.4f}, F1: {s[f1]:2.4f}".format(s=f1_stats)
 
     f1_stats = evaluate(dev_iter)
     print_stats('Dev', f1_stats)
     STATS['dev_stats'] = f1_stats
-    # print "Dev:: P: {s[precision]:2.4f}, R: {s[recall]:2.4f}, F1: {s[f1]:2.4f}".format(s=f1_stats)
 
     f1_stats = evaluate(test_iter)
     print_stats('Test', f1_stats)
     STATS['test_stats'] = f1_stats
-    # print "Test:: P: {s[precision]:2.4f}, R: {s[recall]:2.4f}, F1: {s[f1]:2.4f}".format(s=f1_stats)
 
     stats_fname = 'experiments/'+model_name+'_stats.json'
     print "Dumping run stats to {}".format(stats_fname)

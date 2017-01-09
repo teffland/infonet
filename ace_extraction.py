@@ -22,7 +22,6 @@ def train(STATS, model_name,
           lstm_size, learning_rate, dropout,
           eval_only=False,
           max_dist=500,
-          plot_fit_curve=False,
           **kwds):
     # unpack dataset
     token_vocab = dataset['token_vocab']
@@ -33,45 +32,23 @@ def train(STATS, model_name,
     start_tags = [ boundary_vocab.idx(tag) for tag in tag_map['start_tags'] ]
     in_tags = [ boundary_vocab.idx(tag) for tag in tag_map['start_tags'] ]
     out_tags = [ boundary_vocab.idx(tag) for tag in tag_map['start_tags'] ]
-    x_train = dataset['x_train']
-    x_dev = dataset['x_dev']
-    x_test = dataset['x_test']
-    b_train = dataset['b_train']
-    b_dev = dataset['b_dev']
-    b_test = dataset['b_test']
-    m_train = dataset['m_train']
-    m_dev = dataset['m_dev']
-    m_test = dataset['m_test']
-    r_train = dataset['r_train']
-    r_dev = dataset['r_dev']
-    r_test = dataset['r_test']
-
-    # convert dataset to idxs
-    # before we do conversions, we need to drop infrequent words from the vocab and reindex it
-    print "Setting up...",
-    token_vocab.drop_infrequent()
-    boundary_vocab.drop_infrequent()
-    mention_vocab.drop_infrequent()
-    relation_vocab.drop_infrequent()
-
-    ix_train = convert_sequences(x_train, token_vocab.idx)
-    ix_dev = convert_sequences(x_dev, token_vocab.idx)
-    ix_test = convert_sequences(x_test, token_vocab.idx)
-    ib_train = convert_sequences(b_train, boundary_vocab.idx)
-    ib_dev = convert_sequences(b_dev, boundary_vocab.idx)
-    ib_test = convert_sequences(b_test, boundary_vocab.idx)
-    convert_mention = lambda x: x[:-1]+(mention_vocab.idx(x[-1]),) # type is last
-    im_train = convert_sequences(m_train, convert_mention)
-    im_dev = convert_sequences(m_dev, convert_mention)
-    im_test = convert_sequences(m_test, convert_mention)
-    convert_relation = lambda x: x[:-1]+(relation_vocab.idx(x[-1]),) # type is last
-    ir_train = convert_sequences(r_train, convert_relation)
-    ir_dev = convert_sequences(r_dev, convert_relation)
-    ir_test = convert_sequences(r_test, convert_relation)
+    ix_train = dataset['ix_train']
+    ix_dev = dataset['ix_dev']
+    ix_test = dataset['ix_test']
+    ib_train = dataset['ib_train']
+    ib_dev = dataset['ib_dev']
+    ib_test = dataset['ib_test']
+    im_train = dataset['im_train']
+    im_dev = dataset['im_dev']
+    im_test = dataset['im_test']
+    ir_train = dataset['ir_train']
+    ir_dev = dataset['ir_dev']
+    ir_test = dataset['ir_test']
 
     # data
-    train_iter = SequenceIterator(zip(ix_train, ib_train, im_train, ir_train), batch_size, repeat=True)
-    dev_iter = SequenceIterator(zip(ix_dev, ib_dev, im_dev, ir_dev), batch_size, repeat=True)
+    train_iter = SequenceIterator(zip(ix_train, im_train, ir_train), batch_size, repeat=True)
+    dev_iter = SequenceIterator(zip(ix_dev, im_dev, ir_dev), batch_size, repeat=True)
+    test_iter = SequenceIterator(zip(ix_test, im_dev, ir_dev), batch_size, repeat=True)
 
     # model
     extractor = Extractor(tagger,
@@ -83,29 +60,63 @@ def train(STATS, model_name,
     optimizer.setup(extractor_loss)
     print "Done"
 
+    # evalutation subroutine
+    def evaluate(batch_iter):
+        all_xs, all_ms, all_mpreds, all_rs, all_rpreds = [], [], [], [], []
+        for batch in batch_iter:
+            x_list, m_list, r_list = zip(*batch)
+            all_ms.extend(m_list)
+            all_rs.extend(r_list)
+            m_preds, r_preds, m_spans, r_spans = extractor.predict(sequences2arrays(x_list))
+            all_xs.extend(x_list)
+            mp_list = [ [ (s[0],s[1], p) for p,s in zip(preds, spans)]
+                        for preds,spans in zip(m_preds, m_spans)]
+            all_mpreds.extend(mp_list)
+            rp_list = [ [ (s[0],s[1],s[2],s[3], p) for p,s in zip(preds, spans)]
+                        for preds,spans in zip(r_preds, r_spans)]
+            all_rpreds.extend(rp_list)
+            if batch_iter.is_new_epoch:
+                break
+        convert_mention = lambda x: x[:-1]+(mention_vocab.token(x[-1]),) # type is last
+        all_ms = convert_sequences(all_ms, convert_mention)
+        all_mpreds = convert_sequences(all_mpreds, convert_mention)
+        convert_relation = lambda x: x[:-1]+(relation_vocab.token(x[-1]),) # type is last
+        all_rs= convert_sequences(all_rs, convert_relation)
+        all_rpreds = convert_sequences(all_rpreds, token_vocab.token)
+        f1_stats = mention_stats(all_rpreds, all_rs)
+        return f1_stats
+
+    def print_stats(name, f1_stats):
+        print "{}:: P: {s[precision]:2.4f}, R: {s[recall]:2.4f}, F1: {s[f1]:2.4f}".format(
+                name, s=f1_stats)
+        for t,s in sorted(f1_stats.items(), key=x:x[0]):
+            if type(s) is dict:
+                print "{}:{}: P: {s[precision]:2.4f}, R: {s[recall]:2.4f}, F1: {s[f1]:2.4f}".format(
+                    name, t, s=s)
+
     # training
     if not eval_only:
         # n_epoch = 50
-        best_dev_loss = 1e50
-        n_dev_up = 0
+        best_dev_f1 = 0.0
+        n_dev_down = 0
         epoch_losses = [[]]
-        dev_losses = []
+        dev_f1s = []
+        dev_statss = []
         forward_times = [[]]
         backward_times = [[]]
         seq_lengths = [[]]
         fit_start = time.time()
         for batch in train_iter:
             # prepare data and model
-            x_list, b_list, m_list, r_list = zip(*batch)
+            x_list, m_list, r_list = zip(*batch)
             x_list = sequences2arrays(x_list)
-            b_list = sequences2arrays(b_list)
             extractor.reset_state()
             extractor_loss.cleargrads()
             seq_lengths[-1].append(len(x_list))
 
             # run model
             start = time.time()
-            loss = extractor_loss(x_list, b_list, m_list, r_list)
+            loss = extractor_loss(x_list, m_list, r_list)
             forward_times[-1].append(time.time()-start)
             loss_val = loss.data
             print_batch_loss(loss_val,
@@ -122,28 +133,22 @@ def train(STATS, model_name,
 
             # devation routine
             if train_iter.is_new_epoch:
-                dev_loss = 0
-                for dev_batch in dev_iter:
-                    x_list, b_list, m_list, r_list = zip(*dev_batch)
-                    x_list = sequences2arrays(x_list)
-                    b_list = sequences2arrays(b_list)
-                    extractor.reset_state()
-                    dev_loss += extractor_loss(x_list, b_list, m_list, r_list).data
-                    if dev_iter.is_new_epoch:
-                        break
+                dev_stats = evaluate(dev_iter)
+                dev_f1 = dev_stats['f1']
                 print_epoch_loss(train_iter.epoch,
                                  np.mean(epoch_losses[-1]),
-                                 dev_loss,
+                                 dev_f1,
                                  time=np.sum(forward_times[-1]+backward_times[-1]))
-                dev_losses.append(dev_loss)
+                dev_f1s.append(dev_f1)
+                dev_statss.append(dev_stats)
                 # save best
-                if dev_loss < best_dev_loss:
-                    best_dev_loss = dev_loss
-                    n_dev_up = 0
+                if dev_f1 >= best_dev_f1:
+                    best_dev_f1 = dev_f1
+                    n_dev_down = 0
                     ch.serializers.save_npz('experiments/'+model_name+'.model', extractor)
                 else:
-                    n_dev_up += 1
-                    if n_dev_up > wait:
+                    n_dev_down += 1
+                    if n_dev_down > wait:
                         print "Stopping early"
                         break
                 if train_iter.epoch == n_epoch:
@@ -157,11 +162,10 @@ def train(STATS, model_name,
         fit_time = time.time()-fit_start
         print "Training finished. {} epochs in {}".format(
               n_epoch, sec2hms(fit_time))
-        if plot_fit_curve:
-            plot_learning_curve(epoch_losses, dev_losses, savename='experiments/'+model_name+'_fitcurve.pdf')
 
         STATS['epoch_losses'] = epoch_losses
-        STATS['dev_losses'] = dev_losses
+        STATS['dev_f1s'] = dev_f1s
+        STATS['dev_stats'] = dev_statss
         STATS['seq_lengths'] = seq_lengths
         STATS['forward_times'] = forward_times
         STATS['backward_times'] = backward_times
@@ -173,25 +177,23 @@ def train(STATS, model_name,
     print 'Done'
 
     print 'Evaluating...'
-    preds, x_list, y_list = tagger.predict(ix_train, iy_train)
-    preds = convert_sequences(preds, boundary_vocab.token)
-    xs = convert_sequences(x_list, token_vocab.token)
-    ys = convert_sequences(y_list, boundary_vocab.token)
-    f1_stats = mention_boundary_stats(ys, preds, **tag_map)
-    print "Training:: P: {s[precision]:2.4f}, R: {s[recall]:2.4f}, F1: {s[f1]:2.4f}".format(s=f1_stats)
+    f1_stats = evaluate(train_iter)
+    print_stats('Training', f1_stats)
+    STATS['train_stats'] = f1_stats
 
-    preds, x_list, y_list = tagger.predict(ix_test, iy_test)
-    preds = convert_sequences(preds, boundary_vocab.token)
-    xs = convert_sequences(x_list, token_vocab.token)
-    ys = convert_sequences(y_list, boundary_vocab.token)
-    f1_stats = mention_boundary_stats(ys, preds, **tag_map)
-    print "Testing:: P: {s[precision]:2.4f}, R: {s[recall]:2.4f}, F1: {s[f1]:2.4f}".format(s=f1_stats)
+    f1_stats = evaluate(dev_iter)
+    print_stats('Dev', f1_stats)
+    STATS['dev_stats'] = f1_stats
 
-    print zip(xs[-1], preds[-1], ys[-1])
-    print 'Transition matrix:'
-    print ' '.join([ v for k,v in sorted(boundary_vocab._idx2vocab.items(), key=lambda x:x[0]) ])
-    print tagger.crf.cost.data
-    print boundary_vocab.vocabset
+    f1_stats = evaluate(test_iter)
+    print_stats('Test', f1_stats)
+    STATS['test_stats'] = f1_stats
+
+    stats_fname = 'experiments/'+model_name+'_stats.json'
+    print "Dumping run stats to {}".format(stats_fname)
+    with open(stats_fname, 'w') as f:
+        f.write(json.dumps(STATS))
+    print "Finished Experiment"
 
 def parse_args():
     parser = argparse.ArgumentParser()
