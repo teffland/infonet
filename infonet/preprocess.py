@@ -298,18 +298,6 @@ def get_ace_extraction_data(count=0, **kwds):
         doc['relations'] = relations
         relation_vocab.add([r[4] for r in doc['relations']])
 
-    print "Boundary vocab:"
-    for i, v in enumerate(sorted(list(boundary_vocab.vocabset))):
-        print '\t{}:: {}'.format(i,v)
-
-    print "Mention vocab:"
-    for i, v in enumerate(sorted(list(mention_vocab.vocabset))):
-        print '\t{}:: {}'.format(i,v)
-
-    print "Relation vocab:"
-    for i, v in enumerate(sorted(list(relation_vocab.vocabset))):
-        print '\t{}:: {}'.format(i,v)
-
     # compute the typing stats for extract all mentions
     tag_map = compute_tag_map(boundary_vocab)
 
@@ -332,6 +320,18 @@ def get_ace_extraction_data(count=0, **kwds):
     boundary_vocab.drop_infrequent()
     mention_vocab.drop_infrequent()
     relation_vocab.drop_infrequent()
+
+    print "Boundary vocab:"
+    for i, v in boundary_vocab._idx2vocab.items():
+        print '\t{}:: {}'.format(i,v)
+
+    print "Mention vocab:"
+    for i, v in mention_vocab._idx2vocab.items():
+        print '\t{}:: {}'.format(i,v)
+
+    print "Relation vocab:"
+    for i, v in relation_vocab._idx2vocab.items():
+        print '\t{}:: {}'.format(i,v)
 
     # convert to indices in vocab
     ix_train = convert_sequences(x_train, token_vocab.idx)

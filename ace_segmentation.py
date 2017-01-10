@@ -246,7 +246,6 @@ def parse_args():
                         type=int)
     parser.add_argument('--bidirectional', action='store_true', default=False)
     parser.add_argument('--use_mlp', action='store_true', default=False)
-
     parser.add_argument('--weight_decay',
                         default=.0001,
                         type=float)

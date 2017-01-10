@@ -48,7 +48,7 @@ def train(STATS, model_name,
     # data
     train_iter = SequenceIterator(zip(ix_train, im_train, ir_train), batch_size, repeat=True)
     dev_iter = SequenceIterator(zip(ix_dev, im_dev, ir_dev), batch_size, repeat=True)
-    test_iter = SequenceIterator(zip(ix_test, im_dev, ir_dev), batch_size, repeat=True)
+    test_iter = SequenceIterator(zip(ix_test, im_test, ir_test), batch_size, repeat=True)
 
     # model
     extractor = Extractor(tagger,
@@ -244,7 +244,10 @@ def load_dataset_and_tagger(arg_dict):
     tagger = Tagger(embed, tagger_args['lstm_size'],
                     dataset['boundary_vocab'].v,
                     dropout=tagger_args['dropout'],
-                    crf_type=tagger_args['crf_type'])
+                    crf_type=tagger_args['crf_type'],
+                    bidirectional=tagger_args['bidirectional'],
+                    use_mlp=tagger_args['use_mlp'],
+                    n_layers=tagger_args['n_layers'])
     ch.serializers.load_npz('experiments/{}.model'.format(arg_dict['tagger']), tagger)
     arg_dict['tagger'] = tagger
     return arg_dict

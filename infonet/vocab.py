@@ -148,7 +148,7 @@ class Vocab():
                            self.unk_token:1}
         self._idx2vocab = {0:self.pad_token,
                            1:self.unk_token}
-        for token in self.count_index.keys():
+        for token in sorted(self.count_index.keys()): # make it deterministic
             new_idx = len(self._vocab2idx)
             self._vocab2idx[token] = new_idx
             self._idx2vocab[new_idx] = token

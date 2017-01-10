@@ -42,6 +42,7 @@ class Extractor(ch.Chain):
             self.add_link('lstm_{}'.format(i), lstm)
         self.lstm_size = lstm_size
         self.feature_size = feature_size
+        self.bidirectional = bidirectional
         self.dropout = dropout
         self.use_mlp = use_mlp # NOTE doesn't do anything right now
         self.n_layers = n_layers
@@ -119,6 +120,7 @@ class Extractor(ch.Chain):
                 all_mention_spans, all_relation_spans)
 
     def __call__(self, x_list, train=True, backprop_to_tagger=False):
+        drop = ch.functions.dropout
         # first tag the doc
         tagger_preds, tagger_features = self.tagger.predict(x_list,
                                                             return_features=True)
@@ -139,11 +141,11 @@ class Extractor(ch.Chain):
                 b_lstms = b_lstms[::-1]
                 return [ ch.functions.hstack([f,b]) for f,b in zip(f_lstms, b_lstms)]
             # run the layers of bilstms
-            lstms = [ drop(h, self.dropout, train) for h in bilstm(embeds, self.lstms[0]) ]
+            lstms = [ drop(h, self.dropout, train) for h in bilstm(tagger_features, self.lstms[0]) ]
             for lstm in self.lstms[1:]:
                 lstms = [ drop(h, self.dropout, train) for h in bilstm(lstms, lstm) ]
         else:
-            lstms = [ drop(self.lstms[0](x), self.dropout, train) for x in embeds ]
+            lstms = [ drop(self.lstms[0](x), self.dropout, train) for x in tagger_features ]
             for lstm in self.lstms[1:]:
                 lstms = [ drop(lstm(h), self.dropout, train) for h in lstms ]
 
@@ -206,7 +208,7 @@ class ExtractorLoss(ch.Chain):
             # as many correct mentions (resulting in trivially lower loss),
             # we rescale the loss by (# true mentions / # correct mentions).
             # Intuitively this creates a higher losses for less correct mentions
-            gold_spans = set([m[:2] for m in gold_m])
+            gold_spans = {m[:2] for m in gold_m}
             span2label = {m[:2]:m[2] for m in gold_m}
             weights = []
             labels = []
@@ -218,7 +220,10 @@ class ExtractorLoss(ch.Chain):
                     weights.append(0.0)
                     labels.append(0)
             weights = np.array(weights, dtype=np.float32)
+            print '-'*80
             print "{} / {} correct mentions".format(np.sum(weights), len(weights))
+            print len(gold_m), gold_m
+            print len(m_spans), m_spans
             labels = np.array(labels, dtype=np.int32)
             # print type(m_logits), len(m_logits)
             doc_mention_loss = batch_weighted_softmax_cross_entropy(m_logits, labels,
