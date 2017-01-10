@@ -34,6 +34,9 @@ def train(dataset, STATS, model_name,
     ib_train = dataset['ib_train']
     ib_dev = dataset['ib_dev']
     ib_test = dataset['ib_test']
+    im_train = dataset['im_train']
+    im_dev = dataset['im_dev']
+    im_test = dataset['im_test']
 
     x_train = dataset['x_train']
     x_dev = dataset['x_dev']
@@ -41,12 +44,15 @@ def train(dataset, STATS, model_name,
     b_train = dataset['b_train']
     b_dev = dataset['b_dev']
     b_test = dataset['b_test']
+    m_train = dataset['m_train']
+    m_dev = dataset['m_dev']
+    m_test = dataset['m_test']
 
     print tag_map
 
-    train_iter = SequenceIterator(zip(ix_train, ib_train), batch_size, repeat=True)
-    dev_iter = SequenceIterator(zip(ix_dev, ib_dev), batch_size, repeat=True)
-    test_iter = SequenceIterator(zip(ix_test, ib_test), batch_size, repeat=True)
+    train_iter = SequenceIterator(zip(ix_train, ib_train, im_train), batch_size, repeat=True)
+    dev_iter = SequenceIterator(zip(ix_dev, ib_dev, im_dev), batch_size, repeat=True)
+    test_iter = SequenceIterator(zip(ix_test, ib_test, im_test), batch_size, repeat=True)
 
     # get pretrained vectors
     if w2v_fname:
@@ -62,31 +68,35 @@ def train(dataset, STATS, model_name,
         STATS['args']['embedding_size'] = embedding_size
         print "Embedding size overwritten to {}".format(embedding_size)
     else:
-        embeddings = None
-
+        embeddings = npr.normal(size=(token_vocab.v, embedding_size))
     # model
-    embed = ch.functions.EmbedID(token_vocab.v, embedding_size,
-                                 initialW=embeddings)
-    tagger = Tagger(embed, lstm_size, boundary_vocab.v,
+    # embed = ch.functions.EmbedID(token_vocab.v, embedding_size,
+    #                              initialW=embeddings)
+    tagger = Tagger(embeddings, lstm_size, boundary_vocab.v,
                     crf_type=crf_type,
                     dropout=dropout,
                     bidirectional=bidirectional,
                     use_mlp=use_mlp,
                     n_layers=n_layers)
-    model_loss = TaggerLoss(tagger)
-    optimizer = ch.optimizers.Adam(learning_rate)
-    optimizer.setup(model_loss)
-    optimizer.add_hook(ch.optimizer.WeightDecay(weight_decay))
-    optimizer.add_hook(ch.optimizer.GradientClipping(grad_clip))
+    # # import matplotlib.pyplot as plt
+    # # ax = plt.imshow(tagger.embed.W.data, aspect='auto')
+    # # plt.savefig('embeds_before.png')
+    # model_loss = TaggerLoss(tagger)
+    # optimizer = ch.optimizers.Adam(learning_rate)
+    # optimizer.setup(model_loss)
+    # optimizer.add_hook(ch.optimizer.WeightDecay(weight_decay))
+    # optimizer.add_hook(ch.optimizer.GradientClipping(grad_clip))
     print "Done"
 
     # evalutation subroutine
-    def evaluate(batch_iter):
-        all_preds, all_xs, all_bs = [], [], []
+    def evaluate(tagger, batch_iter):
+        all_preds, all_xs, all_bs, all_ms = [], [], [], []
         for batch in batch_iter:
-            x_list, b_list = zip(*batch)
+            x_list, b_list, m_list = zip(*batch)
             preds = tagger.predict(sequences2arrays(x_list))
             preds = [pred.data for pred in ch.functions.transpose_sequence(preds) ]
+            # for p in preds:
+            #     print p.shape, p
             all_preds.extend(preds)
             all_xs.extend(x_list)
             all_bs.extend(b_list)
@@ -96,6 +106,10 @@ def train(dataset, STATS, model_name,
         all_xs = convert_sequences(all_xs, token_vocab.token)
         all_bs = convert_sequences(all_bs, boundary_vocab.token)
         f1_stats = mention_boundary_stats(all_bs, all_preds, **tag_map)
+        # keep raw predictions for error analysis
+        f1_stats['xs'] = all_xs
+        f1_stats['b_trues'] = all_bs
+        f1_stats['b_preds'] = all_preds
         return f1_stats
 
     def print_stats(name, f1_stats):
@@ -120,7 +134,7 @@ def train(dataset, STATS, model_name,
         fit_start = time.time()
         for batch in train_iter:
             # prepare data and model
-            x_list, b_list = zip(*batch)
+            x_list, b_list, m_list = zip(*batch)
             x_list = sequences2arrays(x_list)
             b_list = sequences2arrays(b_list)
             model_loss.cleargrads()
@@ -146,7 +160,7 @@ def train(dataset, STATS, model_name,
 
             # devation routine
             if train_iter.is_new_epoch:
-                dev_stats = evaluate(dev_iter)
+                dev_stats = evaluate(tagger, dev_iter)
                 dev_f1 = dev_stats['f1']
                 print_epoch_loss(train_iter.epoch,
                                  np.mean(epoch_losses[-1]),
@@ -186,23 +200,34 @@ def train(dataset, STATS, model_name,
 
     # restore and evaluate
     print 'Restoring best model...',
+    # tagger = tagger.copy()
+    # tagger = Tagger(embeddings, lstm_size, boundary_vocab.v,
+    #                 crf_type=crf_type,
+    #                 dropout=dropout,
+    #                 bidirectional=bidirectional,
+    #                 use_mlp=use_mlp,
+    #                 n_layers=n_layers)
     ch.serializers.load_npz('experiments/'+model_name+'.model', tagger)
     print 'Done'
 
     print 'Evaluating...'
-    f1_stats = evaluate(train_iter)
+    f1_stats = evaluate(tagger, train_iter)
     print_stats('Training', f1_stats)
     STATS['train_stats'] = f1_stats
 
-    f1_stats = evaluate(dev_iter)
+    f1_stats = evaluate(tagger, dev_iter)
     print_stats('Dev', f1_stats)
     STATS['dev_stats'] = f1_stats
 
-    f1_stats = evaluate(test_iter)
+    f1_stats = evaluate(tagger, test_iter)
     print_stats('Test', f1_stats)
     STATS['test_stats'] = f1_stats
 
-    stats_fname = 'experiments/'+model_name+'_stats.json'
+    stats_fname = 'experiments/'+model_name
+    if eval_only:
+        stats_fname += '_eval_stats.json'
+    else:
+        stats_name += '_all_stats.json'
     print "Dumping run stats to {}".format(stats_fname)
     with open(stats_fname, 'w') as f:
         f.write(json.dumps(STATS))

@@ -6,7 +6,7 @@ from gru import GRU, BidirectionalGRU
 # import monitor
 
 class Tagger(ch.Chain):
-    def __init__(self, embed, lstm_size, out_size,
+    def __init__(self, embeddings, lstm_size, out_size,
                  bidirectional=False,
                  use_mlp=False,
                  dropout=.25,
@@ -15,12 +15,12 @@ class Tagger(ch.Chain):
         # setup rnn layer
         if bidirectional:
             feature_size = 2*lstm_size
-            lstms = [BidirectionalGRU(lstm_size, n_inputs=embed.W.shape[1])]
+            lstms = [BidirectionalGRU(lstm_size, n_inputs=embeddings.shape[1])]
             for i in range(1,n_layers):
                 lstms.append(BidirectionalGRU(lstm_size, n_inputs=feature_size))
         else:
             feature_size = lstm_size
-            lstms = [GRU(lstm_size, n_inputs=embed.W.shape[1])]
+            lstms = [GRU(lstm_size, n_inputs=embeddings.shape[1])]
             for i in range(1,n_layers):
                 lstms.append(BidirectionalGRU(lstm_size, n_inputs=feature_size))
 
@@ -32,7 +32,8 @@ class Tagger(ch.Chain):
             self.crf_type = crf_type
 
         super(Tagger, self).__init__(
-            embed = embed,
+            embed = ch.links.EmbedID(embeddings.shape[0], embeddings.shape[1],
+                                     embeddings),
             # f_lstm = ch.links.LSTM(embed.W.shape[1], lstm_size),
             # b_lstm = ch.links.LSTM(embed.W.shape[1], lstm_size),
             # f_lstm = ch.links.StatefulGRU(embed.W.shape[1], lstm_size),
@@ -94,8 +95,8 @@ class Tagger(ch.Chain):
             _, preds = self.crf.argmax(features)
             # preds = [ pred.data for pred in preds ]
         else:
-            logits = self(x_list, train=False, return_logits=True)
-            preds = [ ch.functions.argmax(logit, axis=1) for logit in logits ]
+            features = self(x_list, train=False, return_logits=True)
+            preds = [ ch.functions.argmax(logit, axis=1) for logit in features ]
         if return_features:
             return preds, features
         else:

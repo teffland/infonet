@@ -70,6 +70,8 @@ class Extractor(ch.Chain):
         # TODO: Possible extension: using separate features for mentions and relations
         # convert from time-major to batch-major
         tagger_preds = ch.functions.transpose_sequence(tagger_preds)
+        # for p in tagger_preds:
+            # print p.shape, p.data
         tagger_features = ch.functions.transpose_sequence(tagger_features)
 
         # extract the mentions and relations for each doc
@@ -157,7 +159,7 @@ class Extractor(ch.Chain):
         mentions, l_mentions, r_mentions, m_spans, r_spans = self._extract_graph(
             tagger_preds,
             lstms)
-
+        # print [m.shape for m in mentions]
         # concat left and right mentions into one vector per relation
         relations = [ ch.functions.concat(m, axis=1)
                       if type(m[0]) is ch.Variable else m[0] # make sure its nonempty
@@ -221,7 +223,8 @@ class ExtractorLoss(ch.Chain):
                     labels.append(0)
             weights = np.array(weights, dtype=np.float32)
             print '-'*80
-            print "{} / {} correct mentions".format(np.sum(weights), len(weights))
+            print "{} true, {} pred, {} correct mentions".format(
+                len(gold_spans), len(m_spans), np.sum(weights))
             print len(gold_m), gold_m
             print len(m_spans), m_spans
             labels = np.array(labels, dtype=np.int32)

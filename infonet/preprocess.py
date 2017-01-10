@@ -249,7 +249,7 @@ def resolve_annotations(annotations):
                 resolved_annotations.append(ann)
     return resolved_annotations
 
-def get_ace_extraction_data(count=0, **kwds):
+def get_ace_extraction_data(count=0, map_func_name='NoVal_BIO_map', **kwds):
     print "Loading data..."
     # load data
     train_data = json.loads(io.open('data/ace_05_head_yaat_train.json', 'r').read())
@@ -269,7 +269,8 @@ def get_ace_extraction_data(count=0, **kwds):
         doc['annotations'] = resolve_annotations(doc['annotations'])
 
         # boundary labels
-        doc['boundary_labels'] = compute_flat_mention_labels(doc, NoVal_BIO_map)
+        map_func = globals()[map_func_name]
+        doc['boundary_labels'] = compute_flat_mention_labels(doc, map_func)
         boundary_vocab.add(doc['boundary_labels'])
 
         # mention labels

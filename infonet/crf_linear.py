@@ -66,13 +66,15 @@ class LinearChainCRF(link.Link):
             trans_cost=trans_cost_shape,
             trans_bias=(n_label**2,), # bias added to time-dependent parameterizations
             uni_cost=(n_label, n_feature),
-            uni_bias=(n_label,))
+            uni_bias=(n_label,)
+        )
         self.trans_cost.data[...] = npr.uniform(size=self.trans_cost.data.shape)
         self.trans_bias.data[...] = 0
         self.uni_cost.data[...] = npr.uniform(size=self.uni_cost.data.shape)
         self.uni_bias.data[...] = 0
         self.param_type = param_type
         self.n_label = n_label
+        self.n_feature = n_feature
 
     def calc_trans_cost(self, xs):
         if self.param_type == 'simple':
