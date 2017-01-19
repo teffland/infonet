@@ -6,6 +6,7 @@ import argparse
 import numpy as np
 import numpy.random as npr
 import chainer as ch
+from chainer import function_hooks
 
 from infonet.vocab import Vocab
 from infonet.preprocess import get_ace_extraction_data
@@ -72,24 +73,28 @@ def train(dataset, STATS, model_name,
     # model
     # embed = ch.functions.EmbedID(token_vocab.v, embedding_size,
     #                              initialW=embeddings)
+    embeddings = np.zeros((token_vocab.v, embedding_size))
     tagger = Tagger(embeddings, lstm_size, boundary_vocab.v,
                     crf_type=crf_type,
                     dropout=dropout,
                     bidirectional=bidirectional,
                     use_mlp=use_mlp,
                     n_layers=n_layers)
-    # # import matplotlib.pyplot as plt
-    # # ax = plt.imshow(tagger.embed.W.data, aspect='auto')
-    # # plt.savefig('embeds_before.png')
-    # model_loss = TaggerLoss(tagger)
-    # optimizer = ch.optimizers.Adam(learning_rate)
-    # optimizer.setup(model_loss)
-    # optimizer.add_hook(ch.optimizer.WeightDecay(weight_decay))
-    # optimizer.add_hook(ch.optimizer.GradientClipping(grad_clip))
+    # import matplotlib.pyplot as plt
+    # ax = plt.imshow(tagger.embed.W.data, aspect='auto')
+    # plt.savefig('embeds_before.png')
+    model_loss = TaggerLoss(tagger)
+    optimizer = ch.optimizers.Adam(learning_rate)
+    optimizer.setup(model_loss)
+    optimizer.add_hook(ch.optimizer.WeightDecay(weight_decay))
+    optimizer.add_hook(ch.optimizer.GradientClipping(grad_clip))
     print "Done"
 
     # evalutation subroutine
-    def evaluate(tagger, batch_iter):
+    def evaluate(tagger, batch_iter,
+                 token_vocab=token_vocab,
+                 boundary_vocab=boundary_vocab,
+                 tag_map=tag_map):
         all_preds, all_xs, all_bs, all_ms = [], [], [], []
         for batch in batch_iter:
             x_list, b_list, m_list = zip(*batch)
@@ -143,6 +148,7 @@ def train(dataset, STATS, model_name,
 
             # run model
             start = time.time()
+            # with ch.function_hooks.PrintHook():
             loss = model_loss(x_list, b_list)
             forward_times[-1].append(time.time()-start)
             loss_val = np.asscalar(loss.data)
@@ -207,10 +213,21 @@ def train(dataset, STATS, model_name,
     #                 bidirectional=bidirectional,
     #                 use_mlp=use_mlp,
     #                 n_layers=n_layers)
+    # embeddings = np.zeros((token_vocab.v, embedding_size))
+    # tagger = Tagger(embeddings, lstm_size, boundary_vocab.v,
+    #                 crf_type=crf_type,
+    #                 dropout=dropout,
+    #                 bidirectional=bidirectional,
+    #                 use_mlp=use_mlp,
+    #                 n_layers=n_layers)
     ch.serializers.load_npz('experiments/'+model_name+'.model', tagger)
     print 'Done'
 
     print 'Evaluating...'
+    train_iter = SequenceIterator(zip(ix_train, ib_train, im_train), batch_size, repeat=True, shuffle=False)
+    dev_iter = SequenceIterator(zip(ix_dev, ib_dev, im_dev), batch_size, repeat=True, shuffle=False)
+    test_iter = SequenceIterator(zip(ix_test, ib_test, im_test), batch_size, repeat=True, shuffle=False)
+
     f1_stats = evaluate(tagger, train_iter)
     print_stats('Training', f1_stats)
     STATS['train_stats'] = f1_stats

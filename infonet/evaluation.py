@@ -118,8 +118,9 @@ def mention_stats(m_preds, m_trues):
             elif 'event' in m_type:
                 stats['event']['tp'] += 1
             else:
-                raise ValueError, "invalid m type found"
+                print "invalid m type found {}".format(m_type)
         for m in fp:
+            m_type = m[2]
             if m_type not in stats:
                 stats[m_type] = {'tp':0, 'fp':0, 'fn':0}
             stats[m_type]['fp'] += 1
@@ -129,8 +130,9 @@ def mention_stats(m_preds, m_trues):
             elif 'event' in m_type:
                 stats['event']['fp'] += 1
             else:
-                raise ValueError, "invalid m type found"
+                print "invalid m type found {}".format(m_type)
         for m in fn:
+            m_type = m[2]
             if m_type not in stats:
                 stats[m_type] = {'tp':0, 'fp':0, 'fn':0}
             stats[m_type]['fn'] += 1
@@ -140,7 +142,7 @@ def mention_stats(m_preds, m_trues):
             elif 'event' in m_type:
                 stats['event']['fn'] += 1
             else:
-                raise ValueError, "invalid m type found"
+                print "invalid m type found {}".format(m_type)
 
         # tp, fp, fn regardless of type
         stats['tp'] += len(tp)

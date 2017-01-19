@@ -23,7 +23,9 @@ class GRU(ch.Link):
     where :math:`h` is current hidden vector.
     """
     def __init__(self, n_units, n_inputs=None,
-                 W_init=None, U_init=None, bias_init=None):
+                 W_init=None, U_init=None, bias_init=None,
+                 dropout=0.):
+        self.dropout = dropout
         if n_inputs is None:
             n_inputs = n_units
         self.n_inputs = n_inputs
@@ -65,11 +67,15 @@ class GRU(ch.Link):
 
     def set_state(self, array):
         self.h = ch.Variable(array)
+        scale = array.dtype.type(1. / (1 - self.dropout))
+        flag = np.random.rand(*array.shape) >= self.dropout
+        self.rnn_drop_mask = ch.Variable(scale * flag)
 
     def reset_state(self):
         self.h = None
+        self.rnn_drop_mask = None
 
-    def __call__(self, x):
+    def __call__(self, x, train=True):
         # function shorthand
         sigmoid = ch.functions.sigmoid
         tanh = ch.functions.tanh
@@ -92,7 +98,9 @@ class GRU(ch.Link):
         hbar = tanh(matmul(x_rh, self.WU_h) + bcast_to(self.b_h, state_shape))
         h = (1.-z)*h + z*hbar
 
-        self.h[:batch_size] # carry over state
+        self.h[:batch_size].data = h.data# carry over state
+        # if train:
+        #     self.h *= self.rnn_drop_mask
 
         return h
 
@@ -123,7 +131,9 @@ class BidirectionalGRU(ch.Link):
     NOTE: n_units are the number of units for each cell. So the output is double this
     """
     def __init__(self, n_units, n_inputs=None,
-                 W_init=None, U_init=None, bias_init=None):
+                 W_init=None, U_init=None, bias_init=None,
+                 dropout=0.):
+        self.dropout = dropout
         if n_inputs is None:
             n_inputs = n_units
         self.n_inputs = n_inputs
@@ -132,22 +142,28 @@ class BidirectionalGRU(ch.Link):
             # forward gru
             f_W_r=(n_inputs, n_units),
             f_U_r=(n_units, n_units),
+            # f_WU_r=(n_inputs+n_units, n_units),
             f_b_r=(n_units,),
             f_W_z=(n_inputs, n_units),
             f_U_z=(n_units, n_units),
+            # f_WU_z=(n_inputs+n_units, n_units),
             f_b_z=(n_units,),
             f_W_h=(n_inputs, n_units),
             f_U_h=(n_units, n_units),
+            # f_WU_h=(n_inputs+n_units, n_units),
             f_b_h=(n_units,),
             # backward gru
             b_W_r=(n_inputs, n_units),
             b_U_r=(n_units, n_units),
+            # b_WU_r=(n_inputs+n_units, n_units),
             b_b_r=(n_units,),
             b_W_z=(n_inputs, n_units),
             b_U_z=(n_units, n_units),
+            # b_WU_z=(n_inputs+n_units, n_units),
             b_b_z=(n_units,),
             b_W_h=(n_inputs, n_units),
             b_U_h=(n_units, n_units),
+            # b_WU_h=(n_inputs+n_units, n_units),
             b_b_h=(n_units,)
         )
         # initialize params
@@ -177,29 +193,46 @@ class BidirectionalGRU(ch.Link):
         bias_init(self.b_b_h.data)
 
         # concat W's and U's for matmul speed
-        self.f_WU_r = ch.functions.vstack([self.f_W_r, self.f_U_r])
-        self.f_WU_z = ch.functions.vstack([self.f_W_z, self.f_U_z])
-        self.f_WU_h = ch.functions.vstack([self.f_W_h, self.f_U_h])
-        self.b_WU_r = ch.functions.vstack([self.b_W_r, self.b_U_r])
-        self.b_WU_z = ch.functions.vstack([self.b_W_z, self.b_U_z])
-        self.b_WU_h = ch.functions.vstack([self.b_W_h, self.b_U_h])
+        # self.add_persistent('f_WU_r', ch.functions.vstack([self.f_W_r, self.f_U_r]))
+        # self.add_persistent('f_WU_z', ch.functions.vstack([self.f_W_z, self.f_U_z]))
+        # self.add_persistent('f_WU_h', ch.functions.vstack([self.f_W_h, self.f_U_h]))
+        # self.add_persistent('b_WU_r', ch.functions.vstack([self.b_W_r, self.b_U_r]))
+        # self.add_persistent('b_WU_z', ch.functions.vstack([self.b_W_z, self.b_U_z]))
+        # self.add_persistent('b_WU_h', ch.functions.vstack([self.b_W_h, self.b_U_h]))
 
-        # concat fwd and bwd cells for matmul speed
-        self.WU_r = ch.functions.hstack([self.f_WU_r, self.b_WU_r])
-        self.WU_z = ch.functions.hstack([self.f_WU_z, self.b_WU_z])
-        self.WU_h = ch.functions.hstack([self.f_WU_h, self.b_WU_h])
+        # self.f_WU_r = ch.functions.vstack([self.f_W_r, self.f_U_r])
+        # self.f_WU_z = ch.functions.vstack([self.f_W_z, self.f_U_z])
+        # self.f_WU_h = ch.functions.vstack([self.f_W_h, self.f_U_h])
+        # self.b_WU_r = ch.functions.vstack([self.b_W_r, self.b_U_r])
+        # self.b_WU_z = ch.functions.vstack([self.b_W_z, self.b_U_z])
+        # self.b_WU_h = ch.functions.vstack([self.b_W_h, self.b_U_h])
+        # self.add_persistant('f_WU_r', )
+
+        # # concat fwd and bwd cells for matmul speed
+        # self.WU_r = ch.functions.hstack([self.f_WU_r, self.b_WU_r])
+        # self.WU_z = ch.functions.hstack([self.f_WU_z, self.b_WU_z])
+        # self.WU_h = ch.functions.hstack([self.f_WU_h, self.b_WU_h])
 
         self.reset_state()
 
     def set_state(self, f_array, b_array):
         self.h_f = ch.Variable(f_array)
         self.h_b = ch.Variable(b_array)
+        f_scale = f_array.dtype.type(1. / (1 - self.dropout))
+        f_flag = np.random.rand(*f_array.shape) >= self.dropout
+        self.f_rnn_drop_mask = ch.Variable(f_scale * f_flag)
+        b_scale = b_array.dtype.type(1. / (1 - self.dropout))
+        b_flag = np.random.rand(*b_array.shape) >= self.dropout
+        self.b_rnn_drop_mask = ch.Variable(b_scale * b_flag)
+        # print self.b_rnn_drop_mask.shape
 
     def reset_state(self):
         self.h_f = None
         self.h_b = None
+        self.f_rnn_drop_mask = None
+        self.b_rnn_drop_mask = None
 
-    def __call__(self, x_f, x_b):
+    def __call__(self, x_f, x_b, train=True):
         # function shorthand
         sigmoid = ch.functions.sigmoid
         tanh = ch.functions.tanh
@@ -216,25 +249,41 @@ class BidirectionalGRU(ch.Link):
             self.set_state(np.zeros((f_batch_size, self.n_units), dtype=x_f.dtype),
                            np.zeros((f_batch_size, self.n_units), dtype=x_b.dtype))
 
-        # run the cell
-        # handle variable length seq batches (sorted descending)
-        # NOTE that we don't need to set self.h at the end (it happens automatically)
-        # since h is only a reference to self.h.data in memory
+        # concat W's and U's for matmul speed
+        self.f_WU_r = ch.functions.vstack([self.f_W_r, self.f_U_r])
+        self.f_WU_z = ch.functions.vstack([self.f_W_z, self.f_U_z])
+        self.f_WU_h = ch.functions.vstack([self.f_W_h, self.f_U_h])
+        self.b_WU_r = ch.functions.vstack([self.b_W_r, self.b_U_r])
+        self.b_WU_z = ch.functions.vstack([self.b_W_z, self.b_U_z])
+        self.b_WU_h = ch.functions.vstack([self.b_W_h, self.b_U_h])
+
         # fwd cell
+        # if train:
+        #     self.h_f = self.h_f * self.f_rnn_drop_mask
         h_f = self.h_f[:f_batch_size]
+        # if train:
+        #     h_f *= self.f_rnn_drop_mask[:f_batch_size]
         xh_f = ch.functions.hstack([x_f, h_f])
         r_f = sigmoid(matmul(xh_f, self.f_WU_r) + bcast_to(self.f_b_r, f_state_shape))
         z_f = sigmoid(matmul(xh_f, self.f_WU_z) + bcast_to(self.f_b_z, f_state_shape))
         x_rh_f = ch.functions.hstack([x_f, r_f * h_f])
         hbar_f = tanh(matmul(x_rh_f, self.f_WU_h) + bcast_to(self.f_b_h, f_state_shape))
         h_f = (1.-z_f)*h_f + z_f*hbar_f
+        self.h_f.data[:f_batch_size] = h_f.data
+
+
         # bkwd cell
+        # if train:
+        #     self.h_b = self.h_b * self.b_rnn_drop_mask
         h_b = self.h_b[:b_batch_size]
+        # if train:
+        #     h_b *= self.b_rnn_drop_mask[:b_batch_size]
         xh_b = ch.functions.hstack([x_b, h_b])
         r_b = sigmoid(matmul(xh_b, self.b_WU_r) + bcast_to(self.b_b_r, b_state_shape))
         z_b = sigmoid(matmul(xh_b, self.b_WU_z) + bcast_to(self.b_b_z, b_state_shape))
         x_rh_b = ch.functions.hstack([x_b, r_b * h_b])
         hbar_b = tanh(matmul(x_rh_b, self.b_WU_h) + bcast_to(self.b_b_h, b_state_shape))
         h_b = (1.-z_b)*h_b + z_b*hbar_b
+        self.h_b.data[:b_batch_size] = h_b.data
 
         return h_f, h_b

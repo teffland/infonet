@@ -16,10 +16,10 @@ from infonet.tagger import Tagger, TaggerLoss
 from infonet.extractor import Extractor, ExtractorLoss
 from infonet.evaluation import mention_boundary_stats, mention_stats
 
-def train(tagger, STATS,
-          model_name, dataset,
+def train(dataset, tagger,
+          STATS, model_name,
           batch_size, n_epoch, wait,
-          lstm_size, learning_rate, dropout,
+          lstm_size, learning_rate, dropout, use_mlp,
           eval_only=False,
           max_dist=500,
           **kwds):
@@ -45,21 +45,22 @@ def train(tagger, STATS,
     ir_dev = dataset['ir_dev']
     ir_test = dataset['ir_test']
 
+    print tag_map
+
     # data
     train_iter = SequenceIterator(zip(ix_train, im_train, ir_train), batch_size, repeat=True)
     dev_iter = SequenceIterator(zip(ix_dev, im_dev, ir_dev), batch_size, repeat=True)
     test_iter = SequenceIterator(zip(ix_test, im_test, ir_test), batch_size, repeat=True)
 
     # model
-    print tagger.crf_type
     extractor = Extractor(tagger,
                           mention_vocab.v, relation_vocab.v, lstm_size=lstm_size,
+                          use_mlp=use_mlp,
                           start_tags=start_tags, in_tags=in_tags, out_tags=out_tags,
                           max_rel_dist=max_dist)
     extractor_loss = ExtractorLoss(extractor)
     optimizer = ch.optimizers.Adam(learning_rate)
     optimizer.setup(extractor_loss)
-    print "Done"
 
     # evalutation subroutine
     def evaluate(batch_iter):
@@ -84,7 +85,7 @@ def train(tagger, STATS,
         convert_relation = lambda x: x[:-1]+(relation_vocab.token(x[-1]),) # type is last
         all_rs= convert_sequences(all_rs, convert_relation)
         all_rpreds = convert_sequences(all_rpreds, token_vocab.token)
-        f1_stats = mention_stats(all_rpreds, all_rs)
+        f1_stats = mention_stats(all_mpreds, all_ms)
         return f1_stats
 
     def print_stats(name, f1_stats):
@@ -96,6 +97,7 @@ def train(tagger, STATS,
                     name, t, s=s)
 
     # training
+    print "Training"
     if not eval_only:
         # n_epoch = 50
         best_dev_f1 = 0.0
@@ -117,7 +119,8 @@ def train(tagger, STATS,
 
             # run model
             start = time.time()
-            loss = extractor_loss(x_list, m_list, r_list)
+            loss = extractor_loss(x_list, m_list, r_list,
+                                  backprop_to_tagger=True)
             forward_times[-1].append(time.time()-start)
             loss_val = loss.data
             print_batch_loss(loss_val,
@@ -140,6 +143,7 @@ def train(tagger, STATS,
                                  np.mean(epoch_losses[-1]),
                                  dev_f1,
                                  time=np.sum(forward_times[-1]+backward_times[-1]))
+                print_stats('Dev', dev_stats)
                 dev_f1s.append(dev_f1)
                 dev_statss.append(dev_stats)
                 # save best
@@ -221,6 +225,7 @@ def parse_args():
     parser.add_argument('--lstm_size',
                         default=50,
                         type=int)
+    parser.add_argument('--use_mlp', action='store_true', default=False)
     parser.add_argument('--eval_only', action='store_true', default=False)
     parser.add_argument('--rseed', type=int, default=42,
                         help='Sets the random seed')
@@ -240,7 +245,6 @@ def load_dataset_and_tagger(arg_dict):
     model_name = tagger_stats['model_name']
     # load in dataset (need this to create the tagger)
     dataset = get_ace_extraction_data(**tagger_args)
-    arg_dict['dataset'] = dataset
     # create and load the actual tagger
     embeddings = np.zeros((dataset['token_vocab'].v, tagger_args['embedding_size']))
     tagger = Tagger(embeddings,
@@ -252,34 +256,34 @@ def load_dataset_and_tagger(arg_dict):
                     use_mlp=tagger_args['use_mlp'],
                     n_layers=tagger_args['n_layers'])
     ch.serializers.load_npz('experiments/'+model_name+'.model', tagger)
-    ###es
-    print 'eval'
-    ix_train, ib_train, im_train = dataset['ix_train'], dataset['ib_train'], dataset['im_train']
-    train_iter = SequenceIterator(zip(ix_train, ib_train, im_train), 400, repeat=True)
-    boundary_vocab, token_vocab = dataset['boundary_vocab'], dataset['token_vocab']
-    tag_map = dataset['tag_map']
-    all_preds, all_xs, all_bs, all_ms = [], [], [], []
-    for batch in train_iter:
-        x_list, b_list, m_list = zip(*batch)
-        preds = tagger.predict(sequences2arrays(x_list))
-        preds = [pred.data for pred in ch.functions.transpose_sequence(preds) ]
-        # for p in preds:
-        #     print p.shape, p
-        all_preds.extend(preds)
-        all_xs.extend(x_list)
-        all_bs.extend(b_list)
-        if train_iter.is_new_epoch:
-            break
-    all_preds = convert_sequences(all_preds, boundary_vocab.token)
-    all_xs = convert_sequences(all_xs, token_vocab.token)
-    all_bs = convert_sequences(all_bs, boundary_vocab.token)
-    f1_stats = mention_boundary_stats(all_bs, all_preds, **tag_map)
+    # ###
+    # print 'eval'
+    # ix_train, ib_train, im_train = dataset['ix_train'], dataset['ib_train'], dataset['im_train']
+    # train_iter = SequenceIterator(zip(ix_train, ib_train, im_train), 400, repeat=True)
+    # boundary_vocab, token_vocab = dataset['boundary_vocab'], dataset['token_vocab']
+    # tag_map = dataset['tag_map']
+    # all_preds, all_xs, all_bs, all_ms = [], [], [], []
+    # for batch in train_iter:
+    #     x_list, b_list, m_list = zip(*batch)
+    #     preds = tagger.predict(sequences2arrays(x_list))
+    #     preds = [pred.data for pred in ch.functions.transpose_sequence(preds) ]
+    #     # for p in preds:
+    #     #     print p.shape, p
+    #     all_preds.extend(preds)
+    #     all_xs.extend(x_list)
+    #     all_bs.extend(b_list)
+    #     if train_iter.is_new_epoch:
+    #         break
+    # all_preds = convert_sequences(all_preds, boundary_vocab.token)
+    # all_xs = convert_sequences(all_xs, token_vocab.token)
+    # all_bs = convert_sequences(all_bs, boundary_vocab.token)
+    # f1_stats = mention_boundary_stats(all_bs, all_preds, **tag_map)
     # keep raw predictions for error analysis
     # f1_stats['xs'] = all_xs
     # f1_stats['b_trues'] = all_bs
     # f1_stats['b_preds'] = all_preds
-    print f1_stats
-    return arg_dict, tagger
+    # print f1_stats
+    return dataset, tagger
 
 def name_extractor(args):
     model_name = 'extractor_{a.lstm_size}_{a.dropout}_\
@@ -295,5 +299,5 @@ if __name__ == '__main__':
              'model_name':model_name,
              'start_time':time.time()}
 
-    arg_dict, tagger = load_dataset_and_tagger(arg_dict)
-    train(tagger, STATS=STATS, model_name=model_name, **arg_dict)
+    dataset, tagger = load_dataset_and_tagger(arg_dict)
+    train(dataset, tagger, STATS=STATS, model_name=model_name, **arg_dict)

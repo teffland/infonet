@@ -15,14 +15,17 @@ class Tagger(ch.Chain):
         # setup rnn layer
         if bidirectional:
             feature_size = 2*lstm_size
-            lstms = [BidirectionalGRU(lstm_size, n_inputs=embeddings.shape[1])]
+            lstms = [BidirectionalGRU(lstm_size, n_inputs=embeddings.shape[1],
+                                      dropout=dropout)]
+            # lstms = [ch.links.LSTM(embeddings.shape[1], feature_size)]
             for i in range(1,n_layers):
-                lstms.append(BidirectionalGRU(lstm_size, n_inputs=feature_size))
+                lstms.append(BidirectionalGRU(lstm_size, n_inputs=feature_size, dropout=dropout))
         else:
             feature_size = lstm_size
-            lstms = [GRU(lstm_size, n_inputs=embeddings.shape[1])]
+            lstms = [GRU(lstm_size, n_inputs=embeddings.shape[1], dropout=dropout)]
+            # lstms = [ch.links.LSTM(embeddings.shape[1], feature_size)]
             for i in range(1,n_layers):
-                lstms.append(BidirectionalGRU(lstm_size, n_inputs=feature_size))
+                lstms.append(GRU(lstm_size, n_inputs=feature_size, dropout=dropout))
 
         # setup crf layer
         if crf_type in 'none':
@@ -39,7 +42,8 @@ class Tagger(ch.Chain):
             # f_lstm = ch.links.StatefulGRU(embed.W.shape[1], lstm_size),
             # b_lstm = ch.links.StatefulGRU(embed.W.shape[1], lstm_size),
             mlp = ch.links.Linear(feature_size, feature_size),
-            out = ch.links.Linear(feature_size, out_size),
+            out = ch.links.Linear(feature_size, feature_size),
+            logit = ch.links.Linear(feature_size, out_size),
             crf = LinearChainCRF(out_size, feature_size, crf_type)
         )
         self.lstms = lstms
@@ -64,26 +68,30 @@ class Tagger(ch.Chain):
             def bilstm(inputs, lstm):
                 f_lstms, b_lstms = [], []
                 for x_f, x_b in zip(inputs, inputs[::-1]):
-                    h_f, h_b = lstm(x_f, x_b)
+                    h_f, h_b = lstm(x_f, x_b, train=train)
                     f_lstms.append(h_f)
                     b_lstms.append(h_b)
                 b_lstms = b_lstms[::-1]
-                return [ ch.functions.hstack([f,b]) for f,b in zip(f_lstms, b_lstms)]
+                return [ ch.functions.hstack([f,b]) for f,b in zip(f_lstms, b_lstms) ]
             # run the layers of bilstms
             lstms = [ drop(h, self.dropout, train) for h in bilstm(embeds, self.lstms[0]) ]
             for lstm in self.lstms[1:]:
                 lstms = [ drop(h, self.dropout, train) for h in bilstm(lstms, lstm) ]
         else:
-            lstms = [ drop(self.lstms[0](x), self.dropout, train) for x in embeds ]
+            lstms = [ drop(self.lstms[0](x, train=train), self.dropout, train) for x in embeds ]
             for lstm in self.lstms[1:]:
-                lstms = [ drop(lstm(h), self.dropout, train) for h in lstms ]
+                lstms = [ drop(lstm(h, train=train), self.dropout, train) for h in lstms ]
 
+        # rnn output layer
+        lstms = [ drop(self.out(h), self.dropout, train) for h in lstms]
+
+        # hidden layer
         if self.use_mlp:
             f = ch.functions.leaky_relu
             lstms = [ drop(f(self.mlp(h)) , self.dropout, train) for h in lstms ]
 
         if return_logits: # no crf layer, so do simple logit layer
-            return [ self.out(h) for h in lstms ]
+            return [ self.logit(h) for h in lstms ]
         else:
             return lstms
 

@@ -30,10 +30,11 @@ class Extractor(ch.Chain):
             feature_size = lstm_size
             lstms = [GRU(lstm_size, n_inputs=tagger.feature_size)]
             for i in range(1,n_layers):
-                lstms.append(BidirectionalGRU(lstm_size, n_inputs=feature_size))
+                lstms.append(GRU(lstm_size, n_inputs=feature_size))
         super(Extractor, self).__init__(
             tagger=tagger,
-            # mlp_m = ch.links.Linear(feature_size, feature_size),
+            mlp = ch.links.Linear(feature_size, feature_size),
+            out=ch.links.Linear(feature_size, feature_size),
             f_m=ch.links.Linear(feature_size, n_mention_class),
             f_r=ch.links.Linear(2*feature_size, n_relation_class)
         )
@@ -44,7 +45,7 @@ class Extractor(ch.Chain):
         self.feature_size = feature_size
         self.bidirectional = bidirectional
         self.dropout = dropout
-        self.use_mlp = use_mlp # NOTE doesn't do anything right now
+        self.use_mlp = use_mlp
         self.n_layers = n_layers
         self.start_tags = start_tags
         self.in_tags = in_tags
@@ -68,6 +69,7 @@ class Extractor(ch.Chain):
           (as measured from the left edge of the consituent mention spans.)
         """
         # TODO: Possible extension: using separate features for mentions and relations
+
         # convert from time-major to batch-major
         tagger_preds = ch.functions.transpose_sequence(tagger_preds)
         # for p in tagger_preds:
@@ -151,9 +153,13 @@ class Extractor(ch.Chain):
             for lstm in self.lstms[1:]:
                 lstms = [ drop(lstm(h), self.dropout, train) for h in lstms ]
 
-        # if self.use_mlp:
-        #     f = ch.functions.leaky_relu
-        #     lstms = [ drop(f(self.mlp(h)) , self.dropout, train) for h in lstms ]
+        # rnn output layer
+        lstms = [ drop(self.out(h) , self.dropout, train) for h in lstms ]
+
+        # hidden layer
+        if self.use_mlp:
+            f = ch.functions.leaky_relu
+            lstms = [ drop(f(self.mlp(h)) , self.dropout, train) for h in lstms ]
 
         # extract the information graph from the tagger
         mentions, l_mentions, r_mentions, m_spans, r_spans = self._extract_graph(
@@ -222,11 +228,11 @@ class ExtractorLoss(ch.Chain):
                     weights.append(0.0)
                     labels.append(0)
             weights = np.array(weights, dtype=np.float32)
-            print '-'*80
-            print "{} true, {} pred, {} correct mentions".format(
-                len(gold_spans), len(m_spans), np.sum(weights))
-            print len(gold_m), gold_m
-            print len(m_spans), m_spans
+            # print '-'*80
+            # print "{} true, {} pred, {} correct mentions".format(
+            #   len(gold_spans), len(m_spans), np.sum(weights))
+            # print len(gold_m), gold_m
+            # print len(m_spans), m_spans
             labels = np.array(labels, dtype=np.int32)
             # print type(m_logits), len(m_logits)
             doc_mention_loss = batch_weighted_softmax_cross_entropy(m_logits, labels,
