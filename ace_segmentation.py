@@ -192,6 +192,7 @@ def train(dataset, STATS, model_name,
         """Reset the monitor statistics of stats"""
         STATS['epoch'] = None
         STATS['epoch_losses'] = []
+        STATS['dev_f1'] = None
         STATS['dev_stats'] = []
         STATS['forward_times'] = []
         STATS['backward_times'] = []
@@ -250,12 +251,14 @@ def train(dataset, STATS, model_name,
             if train_iter.is_new_epoch:
                 dev_stats = evaluate(tagger, dev_iter)
                 dev_f1 = dev_stats['f1']
+                STATS['dev_f1'] = dev_f1
                 print_epoch_loss(train_iter.epoch,
                                  np.mean(STATS['epoch_losses']),
                                  dev_f1,
                                  time=np.sum(STATS['forward_times']+STATS['backward_times']))
                 print_stats('Dev', dev_stats)
                 STATS['dev_stats'].append(dev_stats)
+
                 # save best
                 if dev_f1 >= best_dev_f1:
                     best_dev_f1 = dev_f1
