@@ -268,7 +268,7 @@ def train(dataset, STATS, model_name,
                 STATS['forward_times'].append([])
                 STATS['backward_times'].append([])
                 STATS['reports'].append([])
-                if (train_iter.epoch % 2) == 0:
+                if (train_iter.epoch % 10) == 0:
                     dump_stats(STATS, model_name)
 
         STATS['fit_time'] = time.time()-fit_start
