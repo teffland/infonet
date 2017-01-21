@@ -98,7 +98,7 @@ class GRU(ch.Link):
         hbar = tanh(matmul(x_rh, self.WU_h) + bcast_to(self.b_h, state_shape))
         h = (1.-z)*h + z*hbar
 
-        self.h[:batch_size].data = h.data# carry over state
+        self.h[:batch_size].data = h.data # carry over state
         # if train:
         #     self.h *= self.rnn_drop_mask
 
@@ -234,7 +234,8 @@ class BidirectionalGRU(ch.Link):
 
     def __call__(self, x_f, x_b, train=True):
         # function shorthand
-        sigmoid = ch.functions.hard_sigmoid
+        sigmoid = ch.functions.sigmoid
+        # sigmoid = ch.functions.hard_sigmoid
         tanh = ch.functions.tanh
         matmul = ch.functions.matmul
         hstack = ch.functions.hstack
