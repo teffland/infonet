@@ -19,7 +19,7 @@ from infonet.evaluation import mention_boundary_stats, mention_stats
 def train(dataset, tagger,
           STATS, model_name,
           batch_size, n_epoch, wait,
-          lstm_size, use_mlp, bidirectional,
+          lstm_size, use_mlp, bidirectional, shortcut_embeds,
           learning_rate, dropout,
           eval_only=False,
           max_dist=500,
@@ -69,6 +69,7 @@ def train(dataset, tagger,
     extractor = Extractor(tagger,
                           mention_vocab.v, relation_vocab.v, lstm_size=lstm_size,
                           use_mlp=use_mlp, bidirectional=bidirectional,
+                          shortcut_embeds=shortcut_embeds,
                           # TODO: Add `concat_words` as an option to shortcut the embeddings
                           start_tags=start_tags, in_tags=in_tags, out_tags=out_tags,
                           tag2mtype=tag2mtype,
@@ -244,6 +245,7 @@ def parse_args():
                         type=int)
     parser.add_argument('--use_mlp', action='store_true', default=False)
     parser.add_argument('--bidirectional', action='store_true', default=False)
+    parser.add_argument('--shortcut_embeds', action='store_true', default=False)
     parser.add_argument('--eval_only', action='store_true', default=False)
     parser.add_argument('--rseed', type=int, default=42,
                         help='Sets the random seed')

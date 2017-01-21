@@ -15,6 +15,7 @@ class Extractor(ch.Chain):
                  bidirectional=False,
                  n_layers=1,
                  use_mlp=False,
+                 shortcut_embeds=False,
                  dropout=.25,
                  start_tags=(2,),
                  in_tags=(1,2),
@@ -24,14 +25,18 @@ class Extractor(ch.Chain):
                  msubtype2rtype=None,
                  max_rel_dist=10000):
         # setup rnn layer
+        if shortcut_embeds:
+            tagger_feature_size = tagger.feature_size + tagger.embedding_size
+        else:
+            tagger_feature_size = tagger.feature_size
         if bidirectional:
             feature_size = 2*lstm_size
-            lstms = [BidirectionalGRU(lstm_size, n_inputs=tagger.feature_size)]
+            lstms = [BidirectionalGRU(lstm_size, n_inputs=tagger_feature_size)]
             for i in range(1,n_layers):
                 lstms.append(BidirectionalGRU(lstm_size, n_inputs=feature_size))
         else:
             feature_size = lstm_size
-            lstms = [GRU(lstm_size, n_inputs=tagger.feature_size)]
+            lstms = [GRU(lstm_size, n_inputs=tagger_feature_size)]
             for i in range(1,n_layers):
                 lstms.append(GRU(lstm_size, n_inputs=feature_size))
         # setup other links
@@ -50,6 +55,7 @@ class Extractor(ch.Chain):
         self.bidirectional = bidirectional
         self.dropout = dropout
         self.use_mlp = use_mlp
+        self.shortcut_embeds = shortcut_embeds
         self.n_layers = n_layers
         self.start_tags = start_tags
         self.in_tags = in_tags
@@ -182,6 +188,11 @@ class Extractor(ch.Chain):
         if not backprop_to_tagger:
             for feature in tagger_features:
                 feature.unchain_backward()
+
+        if self.shortcut_embeds:
+            embeds = self.tagger.embeds
+            tagger_features = [ ch.functions.hstack([f,e])
+                                for f,e in zip(tagger_features, embeds)]
 
         # skip the tagger features and go from embeddings
         # tagger_features = [drop(self.tagger.embed(x), self.dropout, train) for x in x_list]

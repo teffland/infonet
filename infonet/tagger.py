@@ -64,7 +64,7 @@ class Tagger(ch.Chain):
 
     def __call__(self, x_list, train=True, return_logits=False):
         drop = ch.functions.dropout
-        embeds = [ drop(self.embed(x), self.dropout, train) for x in x_list ]
+        self.embeds = [ drop(self.embed(x), self.dropout, train) for x in x_list ]
         if self.bidirectional:
             # helper function
             def bilstm(inputs, lstm):
@@ -76,11 +76,11 @@ class Tagger(ch.Chain):
                 b_lstms = b_lstms[::-1]
                 return [ ch.functions.hstack([f,b]) for f,b in zip(f_lstms, b_lstms) ]
             # run the layers of bilstms
-            lstms = [ drop(h, self.dropout, train) for h in bilstm(embeds, self.lstms[0]) ]
+            lstms = [ drop(h, self.dropout, train) for h in bilstm(self.embeds, self.lstms[0]) ]
             for lstm in self.lstms[1:]:
                 lstms = [ drop(h, self.dropout, train) for h in bilstm(lstms, lstm) ]
         else:
-            lstms = [ drop(self.lstms[0](x, train=train), self.dropout, train) for x in embeds ]
+            lstms = [ drop(self.lstms[0](x, train=train), self.dropout, train) for x in self.embeds ]
             for lstm in self.lstms[1:]:
                 lstms = [ drop(lstm(h, train=train), self.dropout, train) for h in lstms ]
 
@@ -97,11 +97,11 @@ class Tagger(ch.Chain):
         else:
             return lstms
 
-    def predict(self, x_list, reset=True, return_features=False):
+    def predict(self, x_list, reset=True, return_features=False, **kwds):
         if reset:
             self.reset_state()
         if self.crf_type:
-            features = self(x_list, train=False, return_logits=False)
+            features = self(x_list, train=False, return_logits=False )
             _, preds = self.crf.argmax(features)
         else:
             features = self(x_list, train=False, return_logits=True)
