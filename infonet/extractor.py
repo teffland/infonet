@@ -60,24 +60,28 @@ class Extractor(ch.Chain):
         # convert the typemaps to indicator array masks
         for k,v in mtype2msubtype.items():
             mask = np.zeros(n_mention_class).astype(np.float32)
-            mask[v] = 1.
+            mask[np.array(v)] = 1.
             mtype2msubtype[k] = mask
         self.mtype2msubtype = mtype2msubtype
-        for k,v in msubtype2rtype.items():
+        for k,v in msubtype2rtype['left'].items():
             mask = np.zeros(n_relation_class).astype(np.float32)
-            mask[v] = 1.
-            msubtype2rtype[k] = mask
+            mask[np.array(v)] = 1.
+            msubtype2rtype['left'][k] = mask
+        for k,v in msubtype2rtype['right'].items():
+            mask = np.zeros(n_relation_class).astype(np.float32)
+            mask[np.array(v)] = 1.
+            msubtype2rtype['right'][k] = mask
         self.msubtype2rtype = msubtype2rtype
-        print self.mtype2msubtype
-        print
-        print self.msubtype2rtype
-        
+        # print self.mtype2msubtype
+        # print
+        # print self.msubtype2rtype
+
     def reset_state(self):
         self.tagger.reset_state()
         for lstm in self.lstms:
             lstm.reset_state()
 
-    def _extract_graph(self, tagger_preds, tagger_features):
+    def _extract_graph(self, tagger_preds, features):
         """ Subroutine responsible for extracting the graph and graph features
         from the tagger predictions using `extract_all_mentions`.
 
@@ -94,57 +98,79 @@ class Extractor(ch.Chain):
         tagger_preds = ch.functions.transpose_sequence(tagger_preds)
         # for p in tagger_preds:
             # print p.shape, p.data
-        tagger_features = ch.functions.transpose_sequence(tagger_features)
+        features = ch.functions.transpose_sequence(features)
 
         # extract the mentions and relations for each doc
         all_boundaries = extract_all_mentions(tagger_preds,
                                               start_tags=self.start_tags,
                                               in_tags=self.in_tags,
                                               out_tags=self.out_tags,
-                                              type_map=self.type_map)
-        all_mentions = []
-        all_mention_spans = []
-        all_left_mentions = []
-        all_right_mentions = []
-        all_relation_spans = []
+                                              tag2mtype=self.tag2mtype)
 
+        all_mentions = [] # features for mentions
+        all_mention_spans = [] # spans in doc for each mention
+        all_mention_masks = [] # bool masks for constraining predictions
+        all_left_mentions = [] # features for left mention of a relation
+        all_right_mentions = [] # features for right mention of a relation
+        all_relation_spans = [] # spans in doc for left and right mentions
+        all_left_mention_masks = [] # bool mask for constraining predictions
+        all_right_mention_masks = [] # bool mask for constraining predictions
+        zipped = zip(all_boundaries, tagger_preds, features)
         # extract graph and features for each doc
-        for s, (boundaries, seq, features) in enumerate(zip(all_boundaries, tagger_preds, tagger_features)):
+        for s, (boundaries, seq, features) in enumerate(zipped):
             mentions = []
-            left_mentions = []  # for relations
-            right_mentions = [] # for relations
             mention_spans = []
+            mention_masks = []
+            left_mentions = []
+            right_mentions = []
             relation_spans = []
-            dists = []
+            left_mention_masks = []
+            right_mention_masks = []
+            moving_rel_idx = 0
             for i, b in enumerate(boundaries):
+                # mention feature is average of its span features
                 mention = ch.functions.sum(features[b[0]:b[1]], axis=0)
                 mention /= ch.functions.broadcast_to(ch.Variable(np.array(b[1]-b[0],
                                                              dtype=np.float32)),
                                                  mention.shape)
                 mentions.append(mention)
                 mention_spans.append((b[0], b[1]))
+                mention_masks.append(self.mtype2msubtype[b[2]])
                 # make a relation to all previous mentions (M choose 2)
-                # for j in range(i):
+                # except those that are further than max_rel_dist away
+                # (prune for speed, accuracy)
+                # for j in range(moving_rel_idx, i):
                 #     bj = boundaries[j]
                 #     if abs(bj[0] - b[0]) < self.max_rel_dist:
                 #         relation_spans.append((bj[0], bj[1], b[0], b[1]))
                 #         left_mentions.append(mentions[j])
                 #         right_mentions.append(mentions[i])
+                #         left_mention_masks.append(self.msubtype2rtype['left'][bj[2]])
+                #         right_mention_masks.append(self.msubtype2rtype['right'][b[2]])
+                #     # if that's too far, then it'll def be too far for the next
+                #     else:
+                #         moving_rel_idx = j
             if mentions:
                 mentions = ch.functions.vstack(mentions)
+                mention_masks = ch.functions.vstack(mention_masks)
             all_mentions.append(mentions)
+            all_mention_masks.append(mention_masks)
+            all_mention_spans.append(mention_spans)
+
             if left_mentions:
                 left_mentions = ch.functions.vstack(left_mentions)
+                left_mention_masks = ch.functions.vstack(left_mention_masks)
             all_left_mentions.append(left_mentions)
+            all_left_mention_masks.append(left_mention_masks)
             if right_mentions:
                 right_mentions = ch.functions.vstack(right_mentions)
+                right_mention_masks = ch.functions.vstack(right_mention_masks)
             all_right_mentions.append(right_mentions)
-
-            # extra bookkeeping
-            all_mention_spans.append(mention_spans)
+            all_right_mention_masks.append(right_mention_masks)
             all_relation_spans.append(relation_spans)
 
         return (all_mentions, all_left_mentions, all_right_mentions,
+                all_mention_masks, all_left_mention_masks, all_right_mention_masks,
                 all_mention_spans, all_relation_spans)
 
     def __call__(self, x_list, train=True, backprop_to_tagger=False):
@@ -152,7 +178,6 @@ class Extractor(ch.Chain):
         # first tag the doc
         tagger_preds, tagger_features = self.tagger.predict(x_list,
                                                             return_features=True)
-
 
         if not backprop_to_tagger:
             for feature in tagger_features:
@@ -182,18 +207,18 @@ class Extractor(ch.Chain):
             for lstm in self.lstms[1:]:
                 lstms = [ drop(lstm(h), self.dropout, train) for h in lstms ]
 
+        f = ch.functions.leaky_relu
         # rnn output layer
-        lstms = [ drop(self.out(h) , self.dropout, train) for h in lstms ]
+        lstms = [ drop(f(self.out(h)) , self.dropout, train) for h in lstms ]
 
         # hidden layer
         if self.use_mlp:
-            f = ch.functions.leaky_relu
             lstms = [ drop(f(self.mlp(h)) , self.dropout, train) for h in lstms ]
 
         # extract the information graph from the tagger
-        mentions, l_mentions, r_mentions, m_spans, r_spans = self._extract_graph(
-            tagger_preds,
-            lstms)
+        (mentions, l_mentions, r_mentions,
+         mention_masks, l_mention_masks, r_mention_masks,
+         m_spans, r_spans) = self._extract_graph( tagger_preds,lstms)
         # print [m.shape for m in mentions]
         # concat left and right mentions into one vector per relation
         relations = [ ch.functions.concat(m, axis=1)
@@ -201,10 +226,12 @@ class Extractor(ch.Chain):
                       for m in zip(l_mentions, r_mentions) ]
 
         # score mentions and relations
-        m_logits = [ self.f_m(m) if type(m) is ch.Variable else []
-                     for m in mentions ]
-        r_logits = [ self.f_r(r) if type(r) is ch.Variable else []
-                     for r in relations ]
+        # additionally apply any type constraint masks
+        m_logits = [ mask * self.f_m(m) if type(m) is ch.Variable else []
+                     for m, mask in zip(mentions, mention_masks) ]
+        r_logits = [ l_mask * r_mask * self.f_r(r) if type(r) is ch.Variable else []
+                     for r, l_mask, r_mask
+                     in zip(relations, l_mention_masks, r_mention_masks) ]
         return m_logits, r_logits, m_spans, r_spans
 
     def predict(self, x_list, reset_state=True):

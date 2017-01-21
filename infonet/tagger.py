@@ -1,3 +1,4 @@
+import numpy as np
 import chainer as ch
 from util import SequenceIterator, sequences2arrays
 from crf_linear import LinearChainCRF
@@ -174,8 +175,7 @@ def extract_mentions(seq,
     we simply take the mode of the types of it's constituent tokens.
     """
     if type(seq[0]) == ch.Variable:
-        seq = [ s.data for s in seq ]
-
+        seq = [ np.asscalar(s.data) for s in seq ]
     mentions = []
     in_mention = False
     mention_start = mention_end = 0

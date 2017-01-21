@@ -173,7 +173,7 @@ def compute_tag_map(boundary_vocab):
                              if t.startswith('O')]),
         'tag2mtype':{t:'-'.join(t.split('-')[1:])
                     if len(t.split('-')) > 1
-                    else None
+                    else 'ALL'
                     for t in boundary_vocab.vocabset
                     }
     }

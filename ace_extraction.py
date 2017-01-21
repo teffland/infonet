@@ -41,10 +41,10 @@ def train(dataset, tagger,
     msubtype2rtype = dataset['msubtype2rtype']
     msubtype2rtype['left'] = { mention_vocab.idx(msubtype):
                                [ relation_vocab.idx(r) for r in s ]
-                               for msubtype, s in msubtype2rtype['left'] }
+                               for msubtype, s in msubtype2rtype['left'].items()}
     msubtype2rtype['right'] = { mention_vocab.idx(msubtype):
                                 [ relation_vocab.idx(r) for r in s ]
-                                for msubtype, s in msubtype2rtype['right'] }
+                                for msubtype, s in msubtype2rtype['right'].items()}
     ix_train = dataset['ix_train']
     ix_dev = dataset['ix_dev']
     ix_test = dataset['ix_test']
@@ -255,11 +255,13 @@ def parse_args():
 
 def load_dataset_and_tagger(arg_dict):
     # load in the tagger options
-    tagger_stats_f = open('experiments/{}_report_stats.json'.format(arg_dict['tagger_f']), 'r')
-    tagger_stats = json.load(tagger_stats_f)
+    print "Loading stats"
+    with open('experiments/{}_report_stats.json'.format(arg_dict['tagger_f']), 'r') as f:
+        for line in f:
+            tagger_stats = json.loads(line)
+            break # only need first log
     tagger_args = tagger_stats['args']
-    print tagger_args
-    print tagger_stats['model_name']
+    print "Tagger args: ", tagger_args
     model_name = tagger_stats['model_name']
     # load in dataset (need this to create the tagger)
     dataset = get_ace_extraction_data(**tagger_args)
