@@ -83,12 +83,13 @@ class Tagger(ch.Chain):
             for lstm in self.lstms[1:]:
                 lstms = [ drop(lstm(h, train=train), self.dropout, train) for h in lstms ]
 
+        f = ch.functions.leaky_relu
         # rnn output layer
-        lstms = [ drop(self.out(h), self.dropout, train) for h in lstms]
+        lstms = [ drop(f(self.out(h)), self.dropout, train) for h in lstms]
 
         # hidden layer
         if self.use_mlp:
-            f = ch.functions.leaky_relu
+
             lstms = [ drop(f(self.mlp(h)) , self.dropout, train) for h in lstms ]
 
         if return_logits: # no crf layer, so do simple logit layer
