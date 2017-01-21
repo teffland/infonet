@@ -24,7 +24,7 @@ from chainer.functions.math import logsumexp
 from chainer.functions.math import minmax
 from chainer.functions.math import sum as _sum
 from chainer.functions.math import matmul
-
+import chainer as ch
 
 class LinearChainCRF(link.Link):
     """Linear-chain conditional random field loss layer.
@@ -94,8 +94,9 @@ class LinearChainCRF(link.Link):
                     f = matmul.matmul(x, self.trans_cost)
                 elif self.param_type == 'bilinear':
                     f = bilinear.bilinear(xi, xj, self.trans_cost)
-                bias = broadcast.broadcast_to(self.trans_bias, f.shape)
-                f += bias
+                # bias = broadcast.broadcast_to(self.trans_bias, f.shape)
+                # f += bias
+                f = ch.functions.bias(f, self.trans_bias)
                 f = reshape.reshape(f, (-1, self.n_label, self.n_label))
                 costs.append(f)
             return costs
@@ -245,7 +246,7 @@ def crf1d(trans_costs, xs, ys):
             batch_offset = Variable(np.arange(batch, dtype=y.dtype)*n_label*n_label)
         else:
             batch_offset = Variable(np.zeros(batch, dtype=y.dtype))
-        cost = reshape.reshape(cost, (cost.size, 1)) # ravel batch x n_label x n_label, 1
+        cost = reshape.reshape(cost, (cost.size, 1)) #  batch x n_label x n_label, 1
         if score.shape[0] > batch:
             y_prev, _ = split_axis.split_axis(y_prev, [batch], axis=0)
             score, score_rest = split_axis.split_axis(score, [batch], axis=0)
@@ -286,7 +287,7 @@ def argmax_crf1d(trans_costs, xs):
             data.
             ``ps`` is a list of :class:`numpy.ndarray` or
             :class:`cupy.ndarray`, and denotes the state that maximizes the
-            point probability.
+            joint probability.
             ``len(ps)`` is equal to ``len(xs)``, and shape of each ``ps[i]`` is
             the mini-batch size of the corresponding ``xs[i]``. That means,
             ``ps[i].shape == xs[i].shape[0:1]``.

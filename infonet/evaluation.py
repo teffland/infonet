@@ -106,7 +106,7 @@ def mention_stats(m_preds, m_trues):
 
         # tp, fp, fn by type
         stats['entity'] = {'tp':0, 'fp':0, 'fn':0}
-        stats['event'] = {'tp':0, 'fp':0, 'fn':0}
+        stats['event-anchor'] = {'tp':0, 'fp':0, 'fn':0}
         for m in tp:
             m_type = m[2]
             if m_type not in stats:
@@ -115,8 +115,8 @@ def mention_stats(m_preds, m_trues):
             # stats by node-type
             if 'entity' in m_type:
                 stats['entity']['tp'] += 1
-            elif 'event' in m_type:
-                stats['event']['tp'] += 1
+            elif 'event-anchor' in m_type:
+                stats['event-anchor']['tp'] += 1
             else:
                 print "invalid m type found {}".format(m_type)
         for m in fp:
@@ -127,8 +127,8 @@ def mention_stats(m_preds, m_trues):
             # stats by node-type
             if 'entity' in m_type:
                 stats['entity']['fp'] += 1
-            elif 'event' in m_type:
-                stats['event']['fp'] += 1
+            elif 'event-anchor' in m_type:
+                stats['event-anchor']['fp'] += 1
             else:
                 print "invalid m type found {}".format(m_type)
         for m in fn:
@@ -139,8 +139,8 @@ def mention_stats(m_preds, m_trues):
             # stats by node-type
             if 'entity' in m_type:
                 stats['entity']['fn'] += 1
-            elif 'event' in m_type:
-                stats['event']['fn'] += 1
+            elif 'event-anchor' in m_type:
+                stats['event-anchor']['fn'] += 1
             else:
                 print "invalid m type found {}".format(m_type)
 

@@ -1,5 +1,5 @@
 import numpy as np
-import numpy.random as npy
+import numpy.random as npr
 import chainer as ch
 
 from tagger import extract_all_mentions
@@ -19,6 +19,7 @@ class Extractor(ch.Chain):
                  start_tags=(2,),
                  in_tags=(1,2),
                  out_tags=(0,),
+                 type_map=None,
                  max_rel_dist=10000):
         # setup rnn layer
         if bidirectional:
@@ -50,6 +51,7 @@ class Extractor(ch.Chain):
         self.start_tags = start_tags
         self.in_tags = in_tags
         self.out_tags = out_tags
+        self.type_map = type_map
         self.max_rel_dist = max_rel_dist
 
     def reset_state(self):
@@ -80,7 +82,8 @@ class Extractor(ch.Chain):
         all_boundaries = extract_all_mentions(tagger_preds,
                                               start_tags=self.start_tags,
                                               in_tags=self.in_tags,
-                                              out_tags=self.out_tags)
+                                              out_tags=self.out_tags,
+                                              type_map=self.type_map)
         all_mentions = []
         all_mention_spans = []
         all_left_mentions = []
@@ -97,15 +100,18 @@ class Extractor(ch.Chain):
             dists = []
             for i, b in enumerate(boundaries):
                 mention = ch.functions.sum(features[b[0]:b[1]], axis=0)
+                mention /= ch.functions.broadcast_to(ch.Variable(np.array(b[1]-b[0],
+                                                             dtype=np.float32)),
+                                                 mention.shape)
                 mentions.append(mention)
                 mention_spans.append((b[0], b[1]))
                 # make a relation to all previous mentions (M choose 2)
-                for j in range(i):
-                    bj = boundaries[j]
-                    if abs(bj[0] - b[0]) < self.max_rel_dist:
-                        relation_spans.append((bj[0], bj[1], b[0], b[1]))
-                        left_mentions.append(mentions[j])
-                        right_mentions.append(mentions[i])
+                # for j in range(i):
+                #     bj = boundaries[j]
+                #     if abs(bj[0] - b[0]) < self.max_rel_dist:
+                #         relation_spans.append((bj[0], bj[1], b[0], b[1]))
+                #         left_mentions.append(mentions[j])
+                #         right_mentions.append(mentions[i])
             if mentions:
                 mentions = ch.functions.vstack(mentions)
             all_mentions.append(mentions)
@@ -128,9 +134,14 @@ class Extractor(ch.Chain):
         # first tag the doc
         tagger_preds, tagger_features = self.tagger.predict(x_list,
                                                             return_features=True)
+
+
         if not backprop_to_tagger:
             for feature in tagger_features:
                 feature.unchain_backward()
+
+        # skip the tagger features and go from embeddings
+        # tagger_features = [drop(self.tagger.embed(x), self.dropout, train) for x in x_list]
 
         # do another layer of features on the tagger layer
         # features = [ self.lstm(f) for f in tagger_features ]

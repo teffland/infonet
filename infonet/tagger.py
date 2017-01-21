@@ -49,6 +49,7 @@ class Tagger(ch.Chain):
         self.lstms = lstms
         for i, lstm in enumerate(self.lstms):
             self.add_link('lstm_{}'.format(i), lstm)
+        self.embedding_size = embeddings.shape[1]
         self.lstm_size = lstm_size
         self.feature_size = feature_size
         self.out_size = out_size
@@ -101,7 +102,6 @@ class Tagger(ch.Chain):
         if self.crf_type:
             features = self(x_list, train=False, return_logits=False)
             _, preds = self.crf.argmax(features)
-            # preds = [ pred.data for pred in preds ]
         else:
             features = self(x_list, train=False, return_logits=True)
             preds = [ ch.functions.argmax(logit, axis=1) for logit in features ]
@@ -110,31 +110,15 @@ class Tagger(ch.Chain):
         else:
             return preds
 
-        # make a single batch out of the data
-        # x_iter = SequenceIterator(zip(x_list, y_list), len(x_list))
-        # x_list, y_list = zip(*x_iter.next())
-        #
-        # # run the model
-        # self.reset_state()
-        # logits_list, lstm_list = self(sequences2arrays(x_list), train=False)
-        # # logits_list = [ logits.data for logits in logits_list ]
-        #
-        # if return_proba:
-        #     if self.crf_type:
-        #         raise NotImplementedError, "CRF sum-product decoder not implemented..."
-        #     else:
-        #         probs = [ ch.functions.softmax(logit) for logit in logits_list ]
-        #         probs = [ prob.data for prob in ch.functions.transpose_sequence(probs) ]
-        #         return probs, x_list, y_list
-        # else:
-        #     if self.crf_type:
-        #         _, preds = self.crf.argmax(lstm_list)
-        #         preds = [ pred.data for pred in ch.functions.transpose_sequence(preds) ]
-        #         return preds, x_list, y_list
-        #     else:
-        #         preds = [ ch.functions.argmax(logit, axis=1) for logit in logits_list ]
-        #         preds = [ pred.data for pred in ch.functions.transpose_sequence(preds) ]
-        #         return preds, x_list, y_list
+    def report(self):
+        summary = {}
+        for link in self.links(skipself=True):
+            for param in link.params():
+                d = '{}/{}/{}'.format(link.name, param.name, 'data')
+                summary[d] = param.data
+                g = '{}/{}/{}'.format(link.name, param.name, 'grad')
+                summary[g] = param.grad
+        return summary
 
 class TaggerLoss(ch.Chain):
     def __init__(self, tagger,
@@ -155,6 +139,9 @@ class TaggerLoss(ch.Chain):
             for logit, y in zip(logits, y_list):
                 loss += self.loss_func(logit, y)
             return loss
+
+    def report(self):
+        return self.tagger.report()
 
 def mode(L):
     """ Compute the mode of a list """

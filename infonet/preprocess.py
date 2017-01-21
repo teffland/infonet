@@ -326,13 +326,13 @@ def get_ace_extraction_data(count=0, map_func_name='NoVal_BIO_map', **kwds):
     for i, v in boundary_vocab._idx2vocab.items():
         print '\t{}:: {}'.format(i,v)
 
-    print "Mention vocab:"
-    for i, v in mention_vocab._idx2vocab.items():
-        print '\t{}:: {}'.format(i,v)
-
-    print "Relation vocab:"
-    for i, v in relation_vocab._idx2vocab.items():
-        print '\t{}:: {}'.format(i,v)
+    # print "Mention vocab:"
+    # for i, v in mention_vocab._idx2vocab.items():
+    #     print '\t{}:: {}'.format(i,v)
+    #
+    # print "Relation vocab:"
+    # for i, v in relation_vocab._idx2vocab.items():
+    #     print '\t{}:: {}'.format(i,v)
 
     # convert to indices in vocab
     ix_train = convert_sequences(x_train, token_vocab.idx)

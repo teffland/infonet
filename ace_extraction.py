@@ -32,6 +32,7 @@ def train(dataset, tagger,
     start_tags = [ boundary_vocab.idx(tag) for tag in tag_map['start_tags'] ]
     in_tags = [ boundary_vocab.idx(tag) for tag in tag_map['in_tags'] ]
     out_tags = [ boundary_vocab.idx(tag) for tag in tag_map['out_tags'] ]
+    # type_ma
     ix_train = dataset['ix_train']
     ix_dev = dataset['ix_dev']
     ix_test = dataset['ix_test']
@@ -57,6 +58,7 @@ def train(dataset, tagger,
                           mention_vocab.v, relation_vocab.v, lstm_size=lstm_size,
                           use_mlp=use_mlp,
                           start_tags=start_tags, in_tags=in_tags, out_tags=out_tags,
+                        #   type_map=type_map,
                           max_rel_dist=max_dist)
     extractor_loss = ExtractorLoss(extractor)
     optimizer = ch.optimizers.Adam(learning_rate)
@@ -120,7 +122,7 @@ def train(dataset, tagger,
             # run model
             start = time.time()
             loss = extractor_loss(x_list, m_list, r_list,
-                                  backprop_to_tagger=True)
+                                  backprop_to_tagger=False)
             forward_times[-1].append(time.time()-start)
             loss_val = loss.data
             print_batch_loss(loss_val,
@@ -229,7 +231,7 @@ def parse_args():
     parser.add_argument('--eval_only', action='store_true', default=False)
     parser.add_argument('--rseed', type=int, default=42,
                         help='Sets the random seed')
-    parser.add_argument('--max_dist', type=int, default=500,
+    parser.add_argument('--max_dist', type=int, default=200,
                         help="""Maximum distance in document to try and classify
                              relations. Model speed/memory usage declines
                              as this increases""")
@@ -237,7 +239,7 @@ def parse_args():
 
 def load_dataset_and_tagger(arg_dict):
     # load in the tagger options
-    tagger_stats_f = open('experiments/{}_all_stats.json'.format(arg_dict['tagger_f']), 'r')
+    tagger_stats_f = open('experiments/{}_report_stats.json'.format(arg_dict['tagger_f']), 'r')
     tagger_stats = json.load(tagger_stats_f)
     tagger_args = tagger_stats['args']
     print tagger_args

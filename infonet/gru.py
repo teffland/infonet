@@ -58,11 +58,6 @@ class GRU(ch.Link):
         bias_init(self.b_z.data)
         bias_init(self.b_h.data)
 
-        # concat W's and U's for matmul speed
-        self.WU_r = ch.functions.vstack([self.W_r, self.U_r])
-        self.WU_z = ch.functions.vstack([self.W_z, self.U_z])
-        self.WU_h = ch.functions.vstack([self.W_h, self.U_h])
-
         self.reset_state()
 
     def set_state(self, array):
@@ -88,6 +83,11 @@ class GRU(ch.Link):
         state_shape = (batch_size, self.n_units)
         if self.h is None:
             self.set_state(np.zeros(state_shape, dtype=x.dtype))
+
+        # concat W's and U's for matmul speed
+        self.WU_r = ch.functions.vstack([self.W_r, self.U_r])
+        self.WU_z = ch.functions.vstack([self.W_z, self.U_z])
+        self.WU_h = ch.functions.vstack([self.W_h, self.U_h])
 
         # run the cell
         h = self.h[:batch_size] # handle variable length seq batches (sorted descending)
@@ -234,7 +234,7 @@ class BidirectionalGRU(ch.Link):
 
     def __call__(self, x_f, x_b, train=True):
         # function shorthand
-        sigmoid = ch.functions.sigmoid
+        sigmoid = ch.functions.hard_sigmoid
         tanh = ch.functions.tanh
         matmul = ch.functions.matmul
         hstack = ch.functions.hstack
