@@ -89,7 +89,6 @@ class Tagger(ch.Chain):
 
         # hidden layer
         if self.use_mlp:
-
             lstms = [ drop(f(self.mlp(h)) , self.dropout, train) for h in lstms ]
 
         if return_logits: # no crf layer, so do simple logit layer

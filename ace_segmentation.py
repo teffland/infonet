@@ -21,13 +21,13 @@ def dump_stats(STATS, model_name):
     # write out stats that involve evaluation of model
     stats = {k:v for k,v in STATS.items()
              if 'stats' in k}
-    with open('experiments/{}_eval_stats.json'.format(model_name), 'w') as f:
-        f.write(json.dumps(stats))
+    with open('experiments/{}_eval_stats.json'.format(model_name), 'a') as f:
+        f.write(json.dumps(stats)+'\n')
     # write out stats that are monitored model statistics
     stats = {k:v for k,v in STATS.items()
              if 'stats' not in k}
-    with open('experiments/{}_report_stats.json'.format(model_name), 'w') as f:
-        f.write(json.dumps(stats))
+    with open('experiments/{}_report_stats.json'.format(model_name), 'a') as f:
+        f.write(json.dumps(stats)+'\n')
     print "Done"
 
 def train(dataset, STATS, model_name,
@@ -188,6 +188,17 @@ def train(dataset, STATS, model_name,
             f1_stats['b_preds'] = all_preds
         return f1_stats
 
+    def reset_stats(STATS):
+        """Reset the monitor statistics of stats"""
+        STATS['epoch'] = None
+        STATS['epoch_losses'] = []
+        STATS['dev_stats'] = []
+        STATS['forward_times'] = []
+        STATS['backward_times'] = []
+        STATS['seq_lengths'] = []
+        STATS['reports'] = []
+        return STATS
+
     def print_stats(name, f1_stats):
         print "{}:: P: {s[precision]:2.4f}, R: {s[recall]:2.4f}, F1: {s[f1]:2.4f}".format(
                 name, s=f1_stats)
@@ -201,55 +212,49 @@ def train(dataset, STATS, model_name,
         # n_epoch = 50
         best_dev_f1 = 0
         n_dev_down = 0
-        STATS['epoch_losses'] = [[]]
-        STATS['dev_f1s'] = []
-        STATS['dev_stats'] = []
-        STATS['forward_times'] = [[]]
-        STATS['backward_times'] = [[]]
-        STATS['seq_lengths'] = [[]]
-        STATS['reports'] = [[]]
+        STATS = reset_stats(STATS)
         fit_start = time.time()
         for batch in train_iter:
+            STATS['epoch'] = train_iter.epoch
             # prepare data and model
             x_list, b_list, m_list = zip(*batch)
             x_list = sequences2arrays(x_list)
             b_list = sequences2arrays(b_list)
             model_loss.cleargrads()
             tagger.reset_state()
-            STATS['seq_lengths'][-1].append(len(x_list))
+            STATS['seq_lengths'].append(len(x_list))
 
             # run model
             start = time.time()
             # with ch.function_hooks.PrintHook():
             loss = model_loss(x_list, b_list)
-            STATS['forward_times'][-1].append(time.time()-start)
+            STATS['forward_times'].append(time.time()-start)
             loss_val = np.asscalar(loss.data)
             # print_batch_loss(loss_val,
             #                  train_iter.epoch+1,
             #                  train_iter.current_position,
             #                  train_iter.n_batches)
-            STATS['epoch_losses'][-1].append(loss_val)
+            STATS['epoch_losses'].append(loss_val)
 
             # backprop
             start = time.time()
             loss.backward()
             optimizer.update()
-            STATS['backward_times'][-1].append(time.time()-start)
+            STATS['backward_times'].append(time.time()-start)
 
             # report params and grads
             reports = {k:v.tolist() for k,v in model_loss.report().items()}
-            STATS['reports'][-1].append(reports)
+            STATS['reports'].append(reports)
 
             # devation routine
             if train_iter.is_new_epoch:
                 dev_stats = evaluate(tagger, dev_iter)
                 dev_f1 = dev_stats['f1']
                 print_epoch_loss(train_iter.epoch,
-                                 np.mean(STATS['epoch_losses'][-1]),
+                                 np.mean(STATS['epoch_losses']),
                                  dev_f1,
-                                 time=np.sum(STATS['forward_times'][-1]+STATS['backward_times'][-1]))
+                                 time=np.sum(STATS['forward_times']+STATS['backward_times']))
                 print_stats('Dev', dev_stats)
-                STATS['dev_f1s'].append(dev_f1)
                 STATS['dev_stats'].append(dev_stats)
                 # save best
                 if dev_f1 >= best_dev_f1:
@@ -263,13 +268,15 @@ def train(dataset, STATS, model_name,
                         break
                 if train_iter.epoch == n_epoch:
                     break
-                STATS['epoch_losses'].append([])
-                STATS['seq_lengths'].append([])
-                STATS['forward_times'].append([])
-                STATS['backward_times'].append([])
-                STATS['reports'].append([])
-                if (train_iter.epoch % 10) == 0:
-                    dump_stats(STATS, model_name)
+                dump_stats(STATS, model_name)
+                STATS = reset_stats(STATS)
+                # STATS['epoch_losses'].append([])
+                # STATS['seq_lengths'].append([])
+                # STATS['forward_times'].append([])
+                # STATS['backward_times'].append([])
+                # STATS['reports'].append([])
+                # if (train_iter.epoch % 10) == 0:
+                #     dump_stats(STATS, model_name)
 
         STATS['fit_time'] = time.time()-fit_start
         print "Training finished. {} epochs in {}".format(
