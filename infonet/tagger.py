@@ -157,7 +157,7 @@ def extract_mentions(seq,
                      start_tags,#=('B', 'U'),
                      in_tags,#=('B', 'I', 'L', 'U'),
                      out_tags,#=('O'),
-                     type_map=None):
+                     tag2mtype=None):
     """ We extract mentions approximately according to the BIO or BILOU schemes
 
     We scan across the sequence, encountering 3 cases:
@@ -184,23 +184,23 @@ def extract_mentions(seq,
             mention_start = i
             in_mention = True
         elif in_mention and s in out_tags: # case 2
-            if type_map:
-                mention_type = mode([ type_map[s] for s in seq[mention_start:i] ])
+            if tag2mtype:
+                mention_type = mode([ tag2mtype[s] for s in seq[mention_start:i] ])
             else:
                 mention_type = None
             mentions.append((mention_start, i, mention_type))
             in_mention=False
         elif in_mention and s in start_tags: # case 3
-            if type_map:
-                mention_type = mode([ type_map[s] for s in seq[mention_start:i] ])
+            if tag2mtype:
+                mention_type = mode([ tag2mtype[s] for s in seq[mention_start:i] ])
             else:
                 mention_type = None
             mentions.append((mention_start, i, mention_type))
             mention_start = i
 
     if in_mention: # we end on a mention
-        if type_map:
-            mention_type = mode([ type_map[s] for s in seq[mention_start:i+1] ])
+        if tag2mtype:
+            mention_type = mode([ tag2mtype[s] for s in seq[mention_start:i+1] ])
         else:
             mention_type = None
         mentions.append((mention_start, i+1, mention_type))

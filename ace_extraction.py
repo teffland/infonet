@@ -19,7 +19,8 @@ from infonet.evaluation import mention_boundary_stats, mention_stats
 def train(dataset, tagger,
           STATS, model_name,
           batch_size, n_epoch, wait,
-          lstm_size, learning_rate, dropout, use_mlp,
+          lstm_size, use_mlp, bidirectional,
+          learning_rate, dropout,
           eval_only=False,
           max_dist=500,
           **kwds):
@@ -29,10 +30,21 @@ def train(dataset, tagger,
     mention_vocab = dataset['mention_vocab']
     relation_vocab = dataset['relation_vocab']
     tag_map = dataset['tag_map']
+    ## convert to indices in vocabs
     start_tags = [ boundary_vocab.idx(tag) for tag in tag_map['start_tags'] ]
     in_tags = [ boundary_vocab.idx(tag) for tag in tag_map['in_tags'] ]
     out_tags = [ boundary_vocab.idx(tag) for tag in tag_map['out_tags'] ]
-    # type_ma
+    tag2mtype = { boundary_vocab.idx(tag):mtype
+                  for tag, mtype in tag_map['tag2mtype'].items() }
+    mtype2msubtype = { mtype:[ mention_vocab.idx(msubtype) for msubtype in s ]
+                       for mtype, s in dataset['mtype2msubtype'].items() }
+    msubtype2rtype = dataset['msubtype2rtype']
+    msubtype2rtype['left'] = { mention_vocab.idx(msubtype):
+                               [ relation_vocab.idx(r) for r in s ]
+                               for msubtype, s in msubtype2rtype['left'] }
+    msubtype2rtype['right'] = { mention_vocab.idx(msubtype):
+                                [ relation_vocab.idx(r) for r in s ]
+                                for msubtype, s in msubtype2rtype['right'] }
     ix_train = dataset['ix_train']
     ix_dev = dataset['ix_dev']
     ix_test = dataset['ix_test']
@@ -46,7 +58,7 @@ def train(dataset, tagger,
     ir_dev = dataset['ir_dev']
     ir_test = dataset['ir_test']
 
-    print tag_map
+    # print tag_map
 
     # data
     train_iter = SequenceIterator(zip(ix_train, im_train, ir_train), batch_size, repeat=True)
@@ -56,9 +68,12 @@ def train(dataset, tagger,
     # model
     extractor = Extractor(tagger,
                           mention_vocab.v, relation_vocab.v, lstm_size=lstm_size,
-                          use_mlp=use_mlp,
+                          use_mlp=use_mlp, bidirectional=bidirectional,
+                          # TODO: Add `concat_words` as an option to shortcut the embeddings
                           start_tags=start_tags, in_tags=in_tags, out_tags=out_tags,
-                        #   type_map=type_map,
+                          tag2mtype=tag2mtype,
+                          mtype2msubtype=mtype2msubtype,
+                          msubtype2rtype=msubtype2rtype,
                           max_rel_dist=max_dist)
     extractor_loss = ExtractorLoss(extractor)
     optimizer = ch.optimizers.Adam(learning_rate)
@@ -228,6 +243,7 @@ def parse_args():
                         default=50,
                         type=int)
     parser.add_argument('--use_mlp', action='store_true', default=False)
+    parser.add_argument('--bidirectional', action='store_true', default=False)
     parser.add_argument('--eval_only', action='store_true', default=False)
     parser.add_argument('--rseed', type=int, default=42,
                         help='Sets the random seed')
@@ -258,33 +274,6 @@ def load_dataset_and_tagger(arg_dict):
                     use_mlp=tagger_args['use_mlp'],
                     n_layers=tagger_args['n_layers'])
     ch.serializers.load_npz('experiments/'+model_name+'.model', tagger)
-    # ###
-    # print 'eval'
-    # ix_train, ib_train, im_train = dataset['ix_train'], dataset['ib_train'], dataset['im_train']
-    # train_iter = SequenceIterator(zip(ix_train, ib_train, im_train), 400, repeat=True)
-    # boundary_vocab, token_vocab = dataset['boundary_vocab'], dataset['token_vocab']
-    # tag_map = dataset['tag_map']
-    # all_preds, all_xs, all_bs, all_ms = [], [], [], []
-    # for batch in train_iter:
-    #     x_list, b_list, m_list = zip(*batch)
-    #     preds = tagger.predict(sequences2arrays(x_list))
-    #     preds = [pred.data for pred in ch.functions.transpose_sequence(preds) ]
-    #     # for p in preds:
-    #     #     print p.shape, p
-    #     all_preds.extend(preds)
-    #     all_xs.extend(x_list)
-    #     all_bs.extend(b_list)
-    #     if train_iter.is_new_epoch:
-    #         break
-    # all_preds = convert_sequences(all_preds, boundary_vocab.token)
-    # all_xs = convert_sequences(all_xs, token_vocab.token)
-    # all_bs = convert_sequences(all_bs, boundary_vocab.token)
-    # f1_stats = mention_boundary_stats(all_bs, all_preds, **tag_map)
-    # keep raw predictions for error analysis
-    # f1_stats['xs'] = all_xs
-    # f1_stats['b_trues'] = all_bs
-    # f1_stats['b_preds'] = all_preds
-    # print f1_stats
     return dataset, tagger
 
 def name_extractor(args):

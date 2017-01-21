@@ -19,7 +19,9 @@ class Extractor(ch.Chain):
                  start_tags=(2,),
                  in_tags=(1,2),
                  out_tags=(0,),
-                 type_map=None,
+                 tag2mtype=None,
+                 mtype2msubtype=None,
+                 msubtype2rtype=None,
                  max_rel_dist=10000):
         # setup rnn layer
         if bidirectional:
@@ -32,6 +34,7 @@ class Extractor(ch.Chain):
             lstms = [GRU(lstm_size, n_inputs=tagger.feature_size)]
             for i in range(1,n_layers):
                 lstms.append(GRU(lstm_size, n_inputs=feature_size))
+        # setup other links
         super(Extractor, self).__init__(
             tagger=tagger,
             mlp = ch.links.Linear(feature_size, feature_size),
@@ -51,9 +54,24 @@ class Extractor(ch.Chain):
         self.start_tags = start_tags
         self.in_tags = in_tags
         self.out_tags = out_tags
-        self.type_map = type_map
+        self.tag2mtype = tag2mtype
         self.max_rel_dist = max_rel_dist
 
+        # convert the typemaps to indicator array masks
+        for k,v in mtype2msubtype.items():
+            mask = np.zeros(n_mention_class).astype(np.float32)
+            mask[v] = 1.
+            mtype2msubtype[k] = mask
+        self.mtype2msubtype = mtype2msubtype
+        for k,v in msubtype2rtype.items():
+            mask = np.zeros(n_relation_class).astype(np.float32)
+            mask[v] = 1.
+            msubtype2rtype[k] = mask
+        self.msubtype2rtype = msubtype2rtype
+        print self.mtype2msubtype
+        print
+        print self.msubtype2rtype
+        
     def reset_state(self):
         self.tagger.reset_state()
         for lstm in self.lstms:

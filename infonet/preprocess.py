@@ -171,13 +171,47 @@ def compute_tag_map(boundary_vocab):
                              if t.startswith(('B', 'U', 'I', 'L'))]),
         'out_tags':tuple([ t for t in boundary_vocab.vocabset
                              if t.startswith('O')]),
-        'type_map':{t:'-'.join(t.split('-')[1:])
+        'tag2mtype':{t:'-'.join(t.split('-')[1:])
                     if len(t.split('-')) > 1
                     else None
                     for t in boundary_vocab.vocabset
                     }
     }
     return tag_map
+
+def compute_typemaps(docs):
+    """ Compute allowable type constraints from docs """
+    mtype2msubtype = {}
+    msubtype2rtype = {'left':{}, 'right':{}}
+    for doc in docs:
+        # eg 'entity' -> {'entity:PER', 'entity:ORG', ...}
+        mspan2msubtype = {} # used for relations
+        for m in doc['mentions']:
+            msubtype = m[2]
+            mspan2msubtype[m[:2]] = msubtype
+            mtype = msubtype.split(':')[0]
+            if mtype in mtype2msubtype:
+                mtype2msubtype[mtype] |= {msubtype}
+            else:
+                mtype2msubtype[mtype] = {msubtype}
+
+        # print {r[4] for r in doc['relations']}
+        for r in doc['relations']:
+            rtype = r[4]
+            left_msubtype = mspan2msubtype[r[:2]]
+            right_msubtype = mspan2msubtype[r[2:4]]
+            # print left_msubtype, rtype, right_msubtype
+            # eg, 'entity:PER' -> ('relation:--ORG-AFF-->', ...) headed forward
+            if left_msubtype in msubtype2rtype['left']:
+                msubtype2rtype['left'][left_msubtype] |= {rtype}
+            else:
+                msubtype2rtype['left'][left_msubtype] = {rtype}
+            # eg, 'entity:ORG' -> ('relation:--ORG-AFF-->', ...) from backward
+            if right_msubtype in msubtype2rtype['right']:
+                msubtype2rtype['right'][right_msubtype] |= {rtype}
+            else:
+                msubtype2rtype['right'][right_msubtype] = {rtype}
+    return mtype2msubtype, msubtype2rtype
 
 def compute_mentions(doc, fine_grained=False, omit_timex=True):
     """ Compute gold mentions as (*span, type) from yaat.
@@ -255,50 +289,58 @@ def get_ace_extraction_data(count=0, map_func_name='NoVal_BIO_map', **kwds):
     train_data = json.loads(io.open('data/ace_05_head_yaat_train.json', 'r').read())
     dev_data = json.loads(io.open('data/ace_05_head_yaat_dev.json', 'r').read())
     test_data = json.loads(io.open('data/ace_05_head_yaat_test.json', 'r').read())
-    all_data_values = train_data.values() + dev_data.values() + test_data.values()
+    # all_data_values = train_data.values() + dev_data.values() + test_data.values()
 
-    # get vocabs, and generate info network annotations
+    # get vocabs and generate info network annotations
     token_vocab = Vocab(min_count=count)
     boundary_vocab = Vocab(min_count=0)
     mention_vocab = Vocab(min_count=0)
     relation_vocab = Vocab(min_count=0)
-    for doc in all_data_values:
-        token_vocab.add(doc['tokens'])
+    for dataset_i, docs in enumerate([train_data.values(), dev_data.values(), test_data.values()]):
+        for doc in docs:
+            if dataset_i==0: # use only train data to estimate vocabs
+                token_vocab.add(doc['tokens'])
 
-        # dedupe and remove nestings/overlaps
-        doc['annotations'] = resolve_annotations(doc['annotations'])
+            # dedupe and remove nestings/overlaps
+            doc['annotations'] = resolve_annotations(doc['annotations'])
 
-        # boundary labels
-        map_func = globals()[map_func_name]
-        doc['boundary_labels'] = compute_flat_mention_labels(doc, map_func)
-        boundary_vocab.add(doc['boundary_labels'])
+            # boundary labels
+            map_func = globals()[map_func_name]
+            doc['boundary_labels'] = compute_flat_mention_labels(doc, map_func)
+            if dataset_i==0: # use only train data to estimate vocabs
+                boundary_vocab.add(doc['boundary_labels'])
 
-        # mention labels
-        doc['mentions'] = compute_mentions(doc)
-        mention_vocab.add([m[2] for m in doc['mentions']])
+            # mention labels
+            doc['mentions'] = compute_mentions(doc)
+            if dataset_i==0: # use only train data to estimate vocabs
+                mention_vocab.add([m[2] for m in doc['mentions']])
 
-        # relation labels
-        relations = compute_relations(doc, doc['mentions'])
-        # print '{} mentions, {} relations'.format(len(doc['mentions']), len(relations))
+            # relation labels
+            relations = compute_relations(doc, doc['mentions'])
+            # print '{} mentions, {} relations'.format(len(doc['mentions']), len(relations))
 
-        # add in NULL relations for all mention pairs that don't have a relation
-        rel_mentions = set([ r[:4] for r in relations])
-        seen_mentions = set()
-        n_null, n_real = 0, 0
-        for i, m1 in enumerate(doc['mentions']):
-            for m2 in doc['mentions'][i+1:]:
-                r = m1[:2] + m2[:2]
-                if r not in rel_mentions:
-                    relations.append(r+(u'--NULL--',))
-                    n_null += 1
-                else:
-                    n_real += 1
-                    seen_mentions |= set([r])
-        assert n_real+n_null == int(comb(len(doc['mentions']), 2)),\
-                "There should always be m choose 2 relations"
-        doc['relations'] = relations
-        relation_vocab.add([r[4] for r in doc['relations']])
+            # add in NULL relations for all mention pairs that don't have a relation
+            rel_mentions = set([ r[:4] for r in relations])
+            seen_mentions = set()
+            n_null, n_real = 0, 0
+            for i, m1 in enumerate(doc['mentions']):
+                for m2 in doc['mentions'][i+1:]:
+                    r = m1[:2] + m2[:2]
+                    if r not in rel_mentions:
+                        relations.append(r+(u'--NULL--',))
+                        n_null += 1
+                    else:
+                        n_real += 1
+                        seen_mentions |= set([r])
+            assert n_real+n_null == int(comb(len(doc['mentions']), 2)),\
+                    "There should always be m choose 2 relations"
+            doc['relations'] = relations
+            if dataset_i==0: # use only train data to estimate vocabs
+                relation_vocab.add([r[4] for r in doc['relations']])
 
+        # estimate type constraints using only train data
+        if dataset_i == 0:
+            mtype2msubtype, msubtype2rtype = compute_typemaps(docs)
     # compute the typing stats for extract all mentions
     tag_map = compute_tag_map(boundary_vocab)
 
@@ -322,10 +364,10 @@ def get_ace_extraction_data(count=0, map_func_name='NoVal_BIO_map', **kwds):
     mention_vocab.drop_infrequent()
     relation_vocab.drop_infrequent()
 
-    print "Boundary vocab:"
-    for i, v in boundary_vocab._idx2vocab.items():
-        print '\t{}:: {}'.format(i,v)
-
+    # print "Boundary vocab:"
+    # for i, v in boundary_vocab._idx2vocab.items():
+    #     print '\t{}:: {}'.format(i,v)
+    #
     # print "Mention vocab:"
     # for i, v in mention_vocab._idx2vocab.items():
     #     print '\t{}:: {}'.format(i,v)
@@ -333,6 +375,22 @@ def get_ace_extraction_data(count=0, map_func_name='NoVal_BIO_map', **kwds):
     # print "Relation vocab:"
     # for i, v in relation_vocab._idx2vocab.items():
     #     print '\t{}:: {}'.format(i,v)
+    #
+    # print "Tags to Mention types:"
+    # for t, m in tag_map['tag2mtype'].items():
+    #     print '\t{}:: {}'.format(t,m)
+    #
+    # print "Mention types to subtypes:"
+    # for m, s in mtype2msubtype.items():
+    #     print '\t{}:'.format(m)
+    #     for t in s:
+    #         print '\t  {}'.format(t)
+    #
+    # print "Mention subtypes to relations:"
+    # for m, s in msubtype2rtype.items():
+    #     print '\t{}:'.format(m)
+    #     for t, v in s.items():
+    #         print '\t  {}:: {}'.format(t, v)
 
     # convert to indices in vocab
     ix_train = convert_sequences(x_train, token_vocab.idx)
@@ -351,11 +409,16 @@ def get_ace_extraction_data(count=0, map_func_name='NoVal_BIO_map', **kwds):
     ir_test = convert_sequences(r_test, convert_relation)
     print '{} train, {} dev, and {} test documents'.format(len(x_train), len(x_dev), len(x_test))
 
-    dataset = { 'token_vocab':token_vocab,
+    dataset = { # vocabs
+                'token_vocab':token_vocab,
                 'boundary_vocab':boundary_vocab,
                 'mention_vocab':mention_vocab,
                 'relation_vocab':relation_vocab,
+                # label compaitbilities for different levels of ie tasks
                 'tag_map':tag_map,
+                'mtype2msubtype':mtype2msubtype,
+                'msubtype2rtype':msubtype2rtype,
+                # tokenized data
                 'x_train':x_train,
                 'b_train':b_train,
                 'm_train':m_train,
@@ -368,6 +431,7 @@ def get_ace_extraction_data(count=0, map_func_name='NoVal_BIO_map', **kwds):
                 'b_test':b_test,
                 'm_test':m_test,
                 'r_test':r_test,
+                # data converted to indices
                 'ix_train':ix_train,
                 'ib_train':ib_train,
                 'im_train':im_train,

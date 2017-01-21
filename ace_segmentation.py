@@ -95,62 +95,62 @@ def train(dataset, STATS, model_name,
                     n_layers=n_layers)
     model_loss = TaggerLoss(tagger)
 
-    class MyAdam(ch.optimizers.Adam):
-        def update(self, lossfun=None, *args, **kwds):
-            """Updates parameters based on a loss function or computed gradients.
-
-            This method runs in two ways.
-
-            - If ``lossfun`` is given, then use it as a loss function to compute
-              gradients.
-            - Otherwise, this method assumes that the gradients are already
-              computed.
-
-            In both cases, the computed gradients are used to update parameters.
-            The actual update routines are defined by the :meth:`update_one`
-            method (or its CPU/GPU versions, :meth:`update_one_cpu` and
-            :meth:`update_one_gpu`).
-
-            """
-            if lossfun is not None:
-                use_cleargrads = getattr(self, '_use_cleargrads', False)
-                loss = lossfun(*args, **kwds)
-                if use_cleargrads:
-                    self.target.cleargrads()
-                else:
-                    self.target.zerograds()
-                loss.backward()
-                del loss
-
-            # TODO(unno): Some optimizers can skip this process if they does not
-            # affect to a parameter when its gradient is zero.
-            for name, param in self.target.namedparams():
-                if param.grad is None:
-                    print name, param.name, 'has no grad'
-                    # with cuda.get_device(param.data):
-                    #     xp = cuda.get_array_module(param.data)
-                    #     param.grad = xp.zeros_like(param.data)
-                    param.grad = np.zeros_like(param.data)
-
-            self.call_hooks()
-            self.prepare()
-
-            self.t += 1
-            states = self._states
-            for name, param in self.target.namedparams():
-                # with cuda.get_device(param.data):
-                print name,
-                self.update_one(param, states[name])
-
-        def update_one_cpu(self, param, state):
-            m, v = state['m'], state['v']
-            grad = param.grad
-            print param.name
-            print 'data', param.data[:5]
-            print 'grad', grad[:5]
-            m += (1 - self.beta1) * (grad - m)
-            v += (1 - self.beta2) * (grad * grad - v)
-            param.data -= self.lr * m / (np.sqrt(v) + self.eps)
+    # class MyAdam(ch.optimizers.Adam):
+    #     def update(self, lossfun=None, *args, **kwds):
+    #         """Updates parameters based on a loss function or computed gradients.
+    #
+    #         This method runs in two ways.
+    #
+    #         - If ``lossfun`` is given, then use it as a loss function to compute
+    #           gradients.
+    #         - Otherwise, this method assumes that the gradients are already
+    #           computed.
+    #
+    #         In both cases, the computed gradients are used to update parameters.
+    #         The actual update routines are defined by the :meth:`update_one`
+    #         method (or its CPU/GPU versions, :meth:`update_one_cpu` and
+    #         :meth:`update_one_gpu`).
+    #
+    #         """
+    #         if lossfun is not None:
+    #             use_cleargrads = getattr(self, '_use_cleargrads', False)
+    #             loss = lossfun(*args, **kwds)
+    #             if use_cleargrads:
+    #                 self.target.cleargrads()
+    #             else:
+    #                 self.target.zerograds()
+    #             loss.backward()
+    #             del loss
+    #
+    #         # TODO(unno): Some optimizers can skip this process if they does not
+    #         # affect to a parameter when its gradient is zero.
+    #         for name, param in self.target.namedparams():
+    #             if param.grad is None:
+    #                 print name, param.name, 'has no grad'
+    #                 # with cuda.get_device(param.data):
+    #                 #     xp = cuda.get_array_module(param.data)
+    #                 #     param.grad = xp.zeros_like(param.data)
+    #                 param.grad = np.zeros_like(param.data)
+    #
+    #         self.call_hooks()
+    #         self.prepare()
+    #
+    #         self.t += 1
+    #         states = self._states
+    #         for name, param in self.target.namedparams():
+    #             # with cuda.get_device(param.data):
+    #             print name,
+    #             self.update_one(param, states[name])
+    #
+    #     def update_one_cpu(self, param, state):
+    #         m, v = state['m'], state['v']
+    #         grad = param.grad
+    #         print param.name
+    #         print 'data', param.data[:5]
+    #         print 'grad', grad[:5]
+    #         m += (1 - self.beta1) * (grad - m)
+    #         v += (1 - self.beta2) * (grad * grad - v)
+    #         param.data -= self.lr * m / (np.sqrt(v) + self.eps)
     # optimizer = MyAdam(learning_rate)
     optimizer = ch.optimizers.Adam(learning_rate)
     # optimizer = ch.optimizers.AdaDelta()
