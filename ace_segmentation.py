@@ -265,7 +265,7 @@ def train(dataset, STATS, model_name,
                     n_dev_down = 0
                     print "Saving model...",
                     ch.serializers.save_npz('experiments/'+model_name+'.model', tagger)
-                    prnt "Done"
+                    print "Done"
                 else:
                     n_dev_down += 1
                     if n_dev_down > wait:

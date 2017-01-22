@@ -107,12 +107,14 @@ def train(dataset, tagger,
         return f1_stats
 
     def print_stats(name, f1_stats):
-        print "{}:: P: {s[precision]:2.4f}, R: {s[recall]:2.4f}, F1: {s[f1]:2.4f}".format(
+        print "{} :: P: {s[precision]:2.4f} R: {s[recall]:2.4f} F1: {s[f1]:2.4f} \
+        tp:{s[tp]} fp:{s[fp]} fn:{s[fn]} support:{s[support]}".format(
                 name, s=f1_stats)
         for t,s in sorted(f1_stats.items(), key= lambda x:x[0]):
             if type(s) is dict:
-                print "{}:{}: P: {s[precision]:2.4f}, R: {s[recall]:2.4f}, F1: {s[f1]:2.4f}".format(
-                    name, t, s=s)
+                print "{} :{}: P: {s[precision]:2.4f} R: {s[recall]:2.4f} F1: {s[f1]:2.4f}\n\
+                \ttp:{s[tp]} fp:{s[fp]} fn:{s[fn]} support:{s[support]}".format(
+                        name, t, s=s)
 
     # training
     print "Training"

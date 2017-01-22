@@ -364,13 +364,13 @@ def get_ace_extraction_data(count=0, map_func_name='NoVal_BIO_map', **kwds):
     mention_vocab.drop_infrequent()
     relation_vocab.drop_infrequent()
 
-    # print "Boundary vocab:"
-    # for i, v in boundary_vocab._idx2vocab.items():
-    #     print '\t{}:: {}'.format(i,v)
-    #
-    # print "Mention vocab:"
-    # for i, v in mention_vocab._idx2vocab.items():
-    #     print '\t{}:: {}'.format(i,v)
+    print "Boundary vocab:"
+    for i, v in boundary_vocab._idx2vocab.items():
+        print '\t{}:: {}'.format(i,v)
+
+    print "Mention vocab:"
+    for i, v in mention_vocab._idx2vocab.items():
+        print '\t{}:: {}'.format(i,v)
     #
     # print "Relation vocab:"
     # for i, v in relation_vocab._idx2vocab.items():
