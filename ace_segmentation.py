@@ -210,7 +210,6 @@ def train(dataset, STATS, model_name,
 
     if not eval_only:
         # training
-        # n_epoch = 50
         best_dev_f1 = 0
         n_dev_down = 0
         STATS = reset_stats(STATS)
@@ -275,13 +274,7 @@ def train(dataset, STATS, model_name,
                     break
                 dump_stats(STATS, model_name)
                 STATS = reset_stats(STATS)
-                # STATS['epoch_losses'].append([])
-                # STATS['seq_lengths'].append([])
-                # STATS['forward_times'].append([])
-                # STATS['backward_times'].append([])
-                # STATS['reports'].append([])
-                # if (train_iter.epoch % 10) == 0:
-                #     dump_stats(STATS, model_name)
+
 
         STATS['fit_time'] = time.time()-fit_start
         print "Training finished. {} epochs in {}".format(
@@ -290,20 +283,6 @@ def train(dataset, STATS, model_name,
 
     # restore and evaluate
     print 'Restoring best model...',
-    # tagger = tagger.copy()
-    # tagger = Tagger(embeddings, lstm_size, boundary_vocab.v,
-    #                 crf_type=crf_type,
-    #                 dropout=dropout,
-    #                 bidirectional=bidirectional,
-    #                 use_mlp=use_mlp,
-    #                 n_layers=n_layers)
-    # embeddings = np.zeros((token_vocab.v, embedding_size))
-    # tagger = Tagger(embeddings, lstm_size, boundary_vocab.v,
-    #                 crf_type=crf_type,
-    #                 dropout=dropout,
-    #                 bidirectional=bidirectional,
-    #                 use_mlp=use_mlp,
-    #                 n_layers=n_layers)
     ch.serializers.load_npz('experiments/'+model_name+'.model', tagger)
     print 'Done'
 

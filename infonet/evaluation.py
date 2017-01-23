@@ -170,3 +170,186 @@ def mention_stats(m_preds, m_trues):
                              (stats[t]['precision']+stats[t]['recall']+1e-15))
             stats[t]['support'] = s['tp'] + s['fp'] + s['fn']
     return stats
+
+def mention_relation_stats(m_preds, m_trues, r_preds, r_trues):
+        stats = {'tp':0, 'fp':0, 'fn':0}
+        stats['node'] = {'tp':0, 'fp':0, 'fn':0}
+        stats['entity'] = {'tp':0, 'fp':0, 'fn':0}
+        stats['event-anchor'] = {'tp':0, 'fp':0, 'fn':0}
+        stats['edge'] = {'tp':0, 'fp':0, 'fn':0}
+        stats['relation'] = {'tp':0, 'fp':0, 'fn':0}
+        stats['event-argument'] = {'tp':0, 'fp':0, 'fn':0}
+        stats['coreference'] = {'tp':0, 'fp':0, 'fn':0}
+        stats['NULL'] = {'tp':0, 'fp':0, 'fn':0}
+        # nodes
+        for m_pred, m_true in zip(m_preds, m_trues):
+            m_pred = set(m_pred)
+            m_true = set(m_true)
+            tp = m_pred & m_true
+            fp = m_pred - m_true
+            fn = m_true - m_pred
+
+            for m in tp:
+                msubtype = m[2]
+                # print 'tp msubstype:', msubtype
+                if msubtype not in stats:
+                    stats[msubtype] = {'tp':0, 'fp':0, 'fn':0}
+                stats[msubtype]['tp'] += 1
+                # stats by node-type
+                if 'entity' in msubtype:
+                    # print 'tp entity'
+                    stats['entity']['tp'] += 1
+                elif 'event-anchor' in msubtype:
+                    # print 'tp event-anchor'
+                    stats['event-anchor']['tp'] += 1
+                else:
+                    print "invalid m type found {}".format(msubtype)
+            for m in fp:
+                msubtype = m[2]
+                # print 'fp msubstype:', msubtype
+                if msubtype not in stats:
+                    stats[msubtype] = {'tp':0, 'fp':0, 'fn':0}
+                stats[msubtype]['fp'] += 1
+                # stats by node-type
+                if 'entity' in msubtype:
+                    # print 'fp entity'
+                    stats['entity']['fp'] += 1
+                elif 'event-anchor' in msubtype:
+                    # print 'fp event-anchor'
+                    stats['event-anchor']['fp'] += 1
+                else:
+                    print "invalid m type found {}".format(msubtype)
+            for m in fn:
+                msubtype = m[2]
+                # print 'fn msubstype:', msubtype
+                if msubtype not in stats:
+                    stats[msubtype] = {'tp':0, 'fp':0, 'fn':0}
+                stats[msubtype]['fn'] += 1
+                # stats by node-type
+                if 'entity' in msubtype:
+                    # print 'fn entity'
+                    stats['entity']['fn'] += 1
+                elif 'event-anchor' in msubtype:
+                    # print 'fn event-anchor'
+                    stats['event-anchor']['fn'] += 1
+                else:
+                    print "invalid m type found {}".format(msubtype)
+
+            # tp, fp, fn regardless of type
+            stats['tp'] += len(tp)
+            stats['fp'] += len(fp)
+            stats['fn'] += len(fn)
+            stats['node']['tp'] += len(tp)
+            stats['node']['fp'] += len(fp)
+            stats['node']['fn'] += len(fn)
+        # # micro stats for all mentions
+        # stats['node']['precision'] = stats['node']['tp'] / float(stats['node']['tp'] + stats['node']['fp'] + 1e-15)
+        # stats['node']['recall'] = stats['node']['tp'] / float(stats['node']['tp'] + stats['node']['fn'] + 1e-15)
+        # stats['node']['f1'] = 2*stats['node']['precision']*stats['node']['recall']/(stats['node']['precision']+stats['node']['recall']+1e-15)
+        # stats['node']['support'] = stats['node']['tp'] + stats['node']['fp'] + stats['node']['fn']
+        # micro stats by type
+        # for t, s in stats.items():
+        #     if type(s) is dict:
+        #         stats[t]['precision'] = s['tp'] / float(s['tp'] + s['fp'] + 1e-15)
+        #         stats[t]['recall'] = s['tp'] / float(s['tp'] + s['fn'] + 1e-15)
+        #         stats[t]['f1'] = (2.*stats[t]['precision']*stats[t]['recall']/
+        #                          (stats[t]['precision']+stats[t]['recall']+1e-15))
+        #         stats[t]['support'] = s['tp'] + s['fp'] + s['fn']
+
+        # edges
+        # NOTE: The evaluation considers an edge correct
+        #       if its type and constituent spans are correct
+        #       It does NOT consider the correctness of the classes of the constituent mentions.
+        # TODO: This might not be the correct evaluation wrt Li and Ji or Yang and Mitchell
+        for r_pred, r_true in zip(r_preds, r_trues):
+            r_pred = set(r_pred)
+            r_true = set(r_true)
+            tp = r_pred & r_true
+            fp = r_pred - r_true
+            fn = r_true - r_pred
+
+            for r in tp:
+                rtype = r[4]
+                # print 'tp msubstype:', msubtype
+                if rtype not in stats:
+                    stats[rtype] = {'tp':0, 'fp':0, 'fn':0}
+                stats[rtype]['tp'] += 1
+                # stats by node-type
+                if 'relation' in rtype:
+                    # print 'tp entity'
+                    stats['relation']['tp'] += 1
+                elif 'event-argument' in rtype:
+                    # print 'tp event-anchor'
+                    stats['event-argument']['tp'] += 1
+                elif 'coreference' in rtype:
+                    # print 'tp event-anchor'
+                    stats['coreference']['tp'] += 1
+                elif 'NULL' in rtype:
+                    # print 'tp event-anchor'
+                    stats['NULL']['tp'] += 1
+                else:
+                    print "invalid r type found in tp {}".format(rtype)
+            for r in fp:
+                rtype = r[4]
+                # print 'tp msubstype:', msubtype
+                if rtype not in stats:
+                    stats[rtype] = {'tp':0, 'fp':0, 'fn':0}
+                stats[rtype]['fp'] += 1
+                # stats by node-type
+                if 'relation' in rtype:
+                    # print 'tp entity'
+                    stats['relation']['fp'] += 1
+                elif 'event-argument' in rtype:
+                    # print 'tp event-anchor'
+                    stats['event-argument']['fp'] += 1
+                elif 'coreference' in rtype:
+                    # print 'tp event-anchor'
+                    stats['coreference']['fp'] += 1
+                elif 'NULL' in rtype:
+                    # print 'tp event-anchor'
+                    stats['NULL']['fp'] += 1
+                else:
+                    print "invalid r type found in fp {}".format(rtype)
+            for r in fn:
+                rtype = r[4]
+                # print 'tp msubstype:', msubtype
+                if rtype not in stats:
+                    stats[rtype] = {'tp':0, 'fp':0, 'fn':0}
+                stats[rtype]['fn'] += 1
+                # stats by node-type
+                if 'relation' in rtype:
+                    # print 'tp entity'
+                    stats['relation']['fn'] += 1
+                elif 'event-argument' in rtype:
+                    # print 'tp event-anchor'
+                    stats['event-argument']['fn'] += 1
+                elif 'coreference' in rtype:
+                    # print 'tp event-anchor'
+                    stats['coreference']['fn'] += 1
+                elif 'NULL' in rtype:
+                    # print 'tp event-anchor'
+                    stats['NULL']['fn'] += 1
+                else:
+                    print "invalid r type found in fn {}".format(rtype)
+
+            # tp, fp, fn regardless of type
+            stats['tp'] += len(tp)
+            stats['fp'] += len(fp)
+            stats['fn'] += len(fn)
+            stats['edge']['tp'] += len(tp)
+            stats['edge']['fp'] += len(fp)
+            stats['edge']['fn'] += len(fn)
+        # micro stats for all
+        stats['precision'] = stats['tp'] / float(stats['tp'] + stats['fp'] + 1e-15)
+        stats['recall'] = stats['tp'] / float(stats['tp'] + stats['fn'] + 1e-15)
+        stats['f1'] = 2*stats['precision']*stats['recall']/(stats['precision']+stats['recall']+1e-15)
+        stats['support'] = stats['tp'] + stats['fp'] + stats['fn']
+        # micro stats by type
+        for t, s in stats.items():
+            if type(s) is dict:
+                stats[t]['precision'] = s['tp'] / float(s['tp'] + s['fp'] + 1e-15)
+                stats[t]['recall'] = s['tp'] / float(s['tp'] + s['fn'] + 1e-15)
+                stats[t]['f1'] = (2.*stats[t]['precision']*stats[t]['recall']/
+                                 (stats[t]['precision']+stats[t]['recall']+1e-15))
+                stats[t]['support'] = s['tp'] + s['fp'] + s['fn']
+        return stats

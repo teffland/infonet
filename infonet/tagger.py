@@ -18,13 +18,11 @@ class Tagger(ch.Chain):
             feature_size = 2*lstm_size
             lstms = [BidirectionalGRU(lstm_size, n_inputs=embeddings.shape[1],
                                       dropout=dropout)]
-            # lstms = [ch.links.LSTM(embeddings.shape[1], feature_size)]
             for i in range(1,n_layers):
                 lstms.append(BidirectionalGRU(lstm_size, n_inputs=feature_size, dropout=dropout))
         else:
             feature_size = lstm_size
             lstms = [GRU(lstm_size, n_inputs=embeddings.shape[1], dropout=dropout)]
-            # lstms = [ch.links.LSTM(embeddings.shape[1], feature_size)]
             for i in range(1,n_layers):
                 lstms.append(GRU(lstm_size, n_inputs=feature_size, dropout=dropout))
 
@@ -38,10 +36,6 @@ class Tagger(ch.Chain):
         super(Tagger, self).__init__(
             embed = ch.links.EmbedID(embeddings.shape[0], embeddings.shape[1],
                                      embeddings),
-            # f_lstm = ch.links.LSTM(embed.W.shape[1], lstm_size),
-            # b_lstm = ch.links.LSTM(embed.W.shape[1], lstm_size),
-            # f_lstm = ch.links.StatefulGRU(embed.W.shape[1], lstm_size),
-            # b_lstm = ch.links.StatefulGRU(embed.W.shape[1], lstm_size),
             mlp = ch.links.Linear(feature_size, feature_size),
             out = ch.links.Linear(feature_size, feature_size),
             logit = ch.links.Linear(feature_size, out_size),

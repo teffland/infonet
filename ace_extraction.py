@@ -14,7 +14,21 @@ from infonet.util import (convert_sequences, sequences2arrays,
                           sec2hms)
 from infonet.tagger import Tagger, TaggerLoss
 from infonet.extractor import Extractor, ExtractorLoss
-from infonet.evaluation import mention_boundary_stats, mention_stats
+from infonet.evaluation import mention_boundary_stats, mention_relation_stats
+
+def dump_stats(STATS, model_name):
+    print "Dumping stats for {}...".format(model_name),
+    # write out stats that involve evaluation of model
+    stats = {k:v for k,v in STATS.items()
+             if 'stats' in k}
+    with open('experiments/{}_eval_stats.json'.format(model_name), 'a') as f:
+        f.write(json.dumps(stats)+'\n')
+    # write out stats that are monitored model statistics
+    stats = {k:v for k,v in STATS.items()
+             if 'stats' not in k}
+    with open('experiments/{}_report_stats.json'.format(model_name), 'a') as f:
+        f.write(json.dumps(stats)+'\n')
+    print "Done"
 
 def train(dataset, tagger,
           STATS, model_name,
@@ -67,10 +81,12 @@ def train(dataset, tagger,
 
     # model
     extractor = Extractor(tagger,
-                          mention_vocab.v, relation_vocab.v, lstm_size=lstm_size,
-                          use_mlp=use_mlp, bidirectional=bidirectional,
+                          mention_vocab.v, relation_vocab.v,
+                          relation_vocab.idx(u'--NULL--'),
+                          lstm_size=lstm_size,
+                          use_mlp=use_mlp,
+                          bidirectional=bidirectional,
                           shortcut_embeds=shortcut_embeds,
-                          # TODO: Add `concat_words` as an option to shortcut the embeddings
                           start_tags=start_tags, in_tags=in_tags, out_tags=out_tags,
                           tag2mtype=tag2mtype,
                           mtype2msubtype=mtype2msubtype,
@@ -81,7 +97,11 @@ def train(dataset, tagger,
     optimizer.setup(extractor_loss)
 
     # evalutation subroutine
-    def evaluate(batch_iter):
+    def evaluate(extractor, batch_iter,
+                 token_vocab=token_vocab,
+                 mention_vocab=mention_vocab,
+                 relation_vocab=relation_vocab,
+                 keep_raw=False):
         all_xs, all_ms, all_mpreds, all_rs, all_rpreds = [], [], [], [], []
         for batch in batch_iter:
             x_list, m_list, r_list = zip(*batch)
@@ -97,80 +117,113 @@ def train(dataset, tagger,
             all_rpreds.extend(rp_list)
             if batch_iter.is_new_epoch:
                 break
+
+        # print [ (len([r for r in rpreds if r[-1] == 0]), len(rpreds))
+        #         for rpreds in all_rpreds]
+        # print [(len(rs), len(rpreds)) for rs, rpreds in zip(all_rs, all_rpreds)]
+        all_xs = convert_sequences(all_xs, token_vocab.token)
         convert_mention = lambda x: x[:-1]+(mention_vocab.token(x[-1]),) # type is last
         all_ms = convert_sequences(all_ms, convert_mention)
         all_mpreds = convert_sequences(all_mpreds, convert_mention)
         convert_relation = lambda x: x[:-1]+(relation_vocab.token(x[-1]),) # type is last
         all_rs= convert_sequences(all_rs, convert_relation)
-        all_rpreds = convert_sequences(all_rpreds, token_vocab.token)
-        f1_stats = mention_stats(all_mpreds, all_ms)
-        return f1_stats
+        all_rpreds = convert_sequences(all_rpreds, convert_relation)
+        # m_f1_stats = mention_stats(all_mpreds, all_ms)
+        # r_f1_stats = relation_stats(all_rpreds, all_rs)
+        f1_stats = mention_relation_stats(all_mpreds, all_ms, all_rpreds, all_rs)
+        if keep_raw:
+            # m_f1_stats['xs'] = all_xs
+            # m_f1_stats['m_preds'] = all_mpreds
+            # m_f1_stats['m_trues'] = all_ms
+            # r_f1_stats['xs'] = all_xs
+            # r_f1_stats['r_preds'] = all_rpreds
+            # r_f1_stats['r_trues'] = all_rs
+            f1_stats['xs'] = all_xs
+            f1_stats['m_preds'] = all_mpreds
+            f1_stats['m_trues'] = all_ms
+            f1_stats['r_preds'] = all_rpreds
+            f1_stats['r_trues'] = all_rs
+        return f1_stats #m_f1_stats, r_f1_stats
+
+    def reset_stats(STATS):
+        """ Reset the monitor statistics of STATS """
+        STATS['epoch'] = None
+        STATS['epoch_losses'] = []
+        STATS['dev_f1'] = None
+        STATS['dev_stats'] = []
+        STATS['forward_times'] = []
+        STATS['backward_times'] = []
+        STATS['seq_lengths'] = []
+        STATS['reports'] = []
+        return STATS
 
     def print_stats(name, f1_stats):
         print "{} :: P: {s[precision]:2.4f} R: {s[recall]:2.4f} F1: {s[f1]:2.4f} \
-        tp:{s[tp]} fp:{s[fp]} fn:{s[fn]} support:{s[support]}".format(
+ tp:{s[tp]} fp:{s[fp]} fn:{s[fn]} support:{s[support]}".format(
                 name, s=f1_stats)
         for t,s in sorted(f1_stats.items(), key= lambda x:x[0]):
             if type(s) is dict:
-                print "{} :{}: P: {s[precision]:2.4f} R: {s[recall]:2.4f} F1: {s[f1]:2.4f}\n\
-                \ttp:{s[tp]} fp:{s[fp]} fn:{s[fn]} support:{s[support]}".format(
+                print "{} :{}: P: {s[precision]:2.4f} R: {s[recall]:2.4f} F1: {s[f1]:2.4f}\
+ tp:{s[tp]} fp:{s[fp]} fn:{s[fn]} support:{s[support]}".format(
                         name, t, s=s)
 
     # training
-    print "Training"
     if not eval_only:
-        # n_epoch = 50
+        print "Training"
         best_dev_f1 = 0.0
         n_dev_down = 0
-        epoch_losses = [[]]
-        dev_f1s = []
-        dev_statss = []
-        forward_times = [[]]
-        backward_times = [[]]
-        seq_lengths = [[]]
+        STATS = reset_stats(STATS)
         fit_start = time.time()
         for batch in train_iter:
+            STATS['epoch'] = train_iter.epoch
             # prepare data and model
             x_list, m_list, r_list = zip(*batch)
             x_list = sequences2arrays(x_list)
             extractor.reset_state()
             extractor_loss.cleargrads()
-            seq_lengths[-1].append(len(x_list))
+            STATS['seq_lengths'].append(len(x_list))
 
             # run model
             start = time.time()
             loss = extractor_loss(x_list, m_list, r_list,
                                   backprop_to_tagger=False)
-            forward_times[-1].append(time.time()-start)
-            loss_val = loss.data
+            STATS['forward_times'].append(time.time()-start)
+            loss_val = np.asscalar(loss.data)
             print_batch_loss(loss_val,
                              train_iter.epoch+1,
                              train_iter.current_position,
                              train_iter.n_batches)
-            epoch_losses[-1].append(loss_val)
+            STATS['epoch_losses'].append(loss_val)
 
             # backprop
             start = time.time()
             loss.backward()
             optimizer.update()
-            backward_times[-1].append(time.time()-start)
+            STATS['backward_times'].append(time.time()-start)
+
+            # report params and grads
+            reports = {k:v.tolist() for k,v in extractor_loss.report().items()}
+            STATS['reports'].append(reports)
 
             # validation routine
             if train_iter.is_new_epoch:
-                dev_stats = evaluate(dev_iter)
+                dev_stats = evaluate(extractor, dev_iter)
                 dev_f1 = dev_stats['f1']
+                STATS['dev_f1'] = dev_f1
                 print_epoch_loss(train_iter.epoch,
-                                 np.mean(epoch_losses[-1]),
+                                 np.mean(STATS['epoch_losses']),
                                  dev_f1,
-                                 time=np.sum(forward_times[-1]+backward_times[-1]))
+                                 time=np.sum(STATS['forward_times']+STATS['backward_times']))
                 print_stats('Dev', dev_stats)
-                dev_f1s.append(dev_f1)
-                dev_statss.append(dev_stats)
+                STATS['dev_stats'].append(dev_stats)
+
                 # save best
                 if dev_f1 >= best_dev_f1:
                     best_dev_f1 = dev_f1
                     n_dev_down = 0
+                    print "Saving model...",
                     ch.serializers.save_npz('experiments/'+model_name+'.model', extractor)
+                    print "Done"
                 else:
                     n_dev_down += 1
                     if n_dev_down > wait:
@@ -178,23 +231,13 @@ def train(dataset, tagger,
                         break
                 if train_iter.epoch == n_epoch:
                     break
-                epoch_losses.append([])
-                seq_lengths.append([])
-                forward_times.append([])
-                backward_times.append([])
+                dump_stats(STATS, model_name)
+                STATS = reset_stats(STATS)
 
 
-        fit_time = time.time()-fit_start
+        STATS['fit_time'] = time.time()-fit_start
         print "Training finished. {} epochs in {}".format(
-              n_epoch, sec2hms(fit_time))
-
-        STATS['epoch_losses'] = epoch_losses
-        STATS['dev_f1s'] = dev_f1s
-        STATS['dev_stats'] = dev_statss
-        STATS['seq_lengths'] = seq_lengths
-        STATS['forward_times'] = forward_times
-        STATS['backward_times'] = backward_times
-        STATS['fit_time'] = fit_time
+              n_epoch, sec2hms(STATS['fit_time']))
 
     # restore and evaluate
     print 'Restoring best model...',
@@ -202,22 +245,23 @@ def train(dataset, tagger,
     print 'Done'
 
     print 'Evaluating...'
-    f1_stats = evaluate(train_iter)
+    train_iter = SequenceIterator(zip(ix_train, ib_train, im_train), batch_size, repeat=True, shuffle=False)
+    dev_iter = SequenceIterator(zip(ix_dev, ib_dev, im_dev), batch_size, repeat=True, shuffle=False)
+    test_iter = SequenceIterator(zip(ix_test, ib_test, im_test), batch_size, repeat=True, shuffle=False)
+
+    f1_stats = evaluate(extractor, train_iter, keep_raw=True)
     print_stats('Training', f1_stats)
     STATS['train_stats'] = f1_stats
 
-    f1_stats = evaluate(dev_iter)
+    f1_stats = evaluate(extractor, dev_iter, keep_raw=True)
     print_stats('Dev', f1_stats)
     STATS['dev_stats'] = f1_stats
 
-    f1_stats = evaluate(test_iter)
+    f1_stats = evaluate(extractor, test_iter, keep_raw=True)
     print_stats('Test', f1_stats)
     STATS['test_stats'] = f1_stats
 
-    stats_fname = 'experiments/'+model_name+'_stats.json'
-    print "Dumping run stats to {}".format(stats_fname)
-    with open(stats_fname, 'w') as f:
-        f.write(json.dumps(STATS))
+    dump_stats(STATS, model_name)
     print "Finished Experiment"
 
 def parse_args():

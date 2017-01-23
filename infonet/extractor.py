@@ -1,16 +1,20 @@
 import numpy as np
 import numpy.random as npr
 import chainer as ch
+import chainer.functions as F
+import chainer.links as L
 
 from tagger import extract_all_mentions
 from special_functions import batch_weighted_softmax_cross_entropy
 from gru import GRU, BidirectionalGRU
+from masked_softmax import masked_softmax
 
 class Extractor(ch.Chain):
     def __init__(self,
                  tagger,
                  n_mention_class,
                  n_relation_class,
+                 null_idx,
                  lstm_size=50,
                  bidirectional=False,
                  n_layers=1,
@@ -42,10 +46,10 @@ class Extractor(ch.Chain):
         # setup other links
         super(Extractor, self).__init__(
             tagger=tagger,
-            mlp = ch.links.Linear(feature_size, feature_size),
-            out=ch.links.Linear(feature_size, feature_size),
-            f_m=ch.links.Linear(feature_size, n_mention_class),
-            f_r=ch.links.Linear(2*feature_size, n_relation_class)
+            mlp = L.Linear(feature_size, feature_size),
+            out=L.Linear(feature_size, feature_size),
+            f_m=L.Linear(feature_size, n_mention_class),
+            f_r=L.Linear(2*feature_size, n_relation_class)
         )
         self.lstms = lstms
         for i, lstm in enumerate(self.lstms):
@@ -62,22 +66,34 @@ class Extractor(ch.Chain):
         self.out_tags = out_tags
         self.tag2mtype = tag2mtype
         self.max_rel_dist = max_rel_dist
+        self.null_idx = null_idx
 
         # convert the typemaps to indicator array masks
+        # mention type -> subtype uses the string label, so keep it as a dict
         for k,v in mtype2msubtype.items():
             mask = np.zeros(n_mention_class).astype(np.float32)
             mask[np.array(v)] = 1.
             mtype2msubtype[k] = mask
         self.mtype2msubtype = mtype2msubtype
+        # for mention subtype -> relation type
+        # we will use the predictions for the mentions
+        # which means its easiest to use the indices of the labels
+        # so we instead create a a mask matrix and look them up with EmbedID
+        left_masks = np.zeros((n_mention_class, n_relation_class)).astype(np.float32)
+        right_masks = np.zeros((n_mention_class, n_relation_class)).astype(np.float32)
         for k,v in msubtype2rtype['left'].items():
-            mask = np.zeros(n_relation_class).astype(np.float32)
-            mask[np.array(v)] = 1.
-            msubtype2rtype['left'][k] = mask
+            left_masks[k, np.array(v)] = 1.
         for k,v in msubtype2rtype['right'].items():
-            mask = np.zeros(n_relation_class).astype(np.float32)
-            mask[np.array(v)] = 1.
-            msubtype2rtype['right'][k] = mask
-        self.msubtype2rtype = msubtype2rtype
+            right_masks[k, np.array(v)] = 1.
+        self.left_masks = left_masks
+        self.right_masks = right_masks
+        # print 'left and right relation masks', self.left_masks, self.right_masks
+        # print 'left mask'
+        # for m in self.left_masks:
+        #     print np.sum(m), m
+        # print 'right mask'
+        # for m in self.left_masks:
+        #     print np.sum(m), m
         # print self.mtype2msubtype
         # print
         # print self.msubtype2rtype
@@ -101,10 +117,10 @@ class Extractor(ch.Chain):
         # TODO: Possible extension: using separate features for mentions and relations
 
         # convert from time-major to batch-major
-        tagger_preds = ch.functions.transpose_sequence(tagger_preds)
+        tagger_preds = F.transpose_sequence(tagger_preds)
         # for p in tagger_preds:
             # print p.shape, p.data
-        features = ch.functions.transpose_sequence(features)
+        features = F.transpose_sequence(features)
 
         # extract the mentions and relations for each doc
         all_boundaries = extract_all_mentions(tagger_preds,
@@ -116,27 +132,29 @@ class Extractor(ch.Chain):
         all_mentions = [] # features for mentions
         all_mention_spans = [] # spans in doc for each mention
         all_mention_masks = [] # bool masks for constraining predictions
-        all_left_mentions = [] # features for left mention of a relation
-        all_right_mentions = [] # features for right mention of a relation
+        all_left_mention_idxs = [] # idxs for left mention of a relation in mention table
+        all_right_mention_idxs = [] # idxs for right mention of a relation in mention table
         all_relation_spans = [] # spans in doc for left and right mentions
-        all_left_mention_masks = [] # bool mask for constraining predictions
-        all_right_mention_masks = [] # bool mask for constraining predictions
+        all_null_rel_spans = [] # predict null for mention pairs > max_rel_dist
         zipped = zip(all_boundaries, tagger_preds, features)
+
         # extract graph and features for each doc
         for s, (boundaries, seq, features) in enumerate(zipped):
             mentions = []
             mention_spans = []
             mention_masks = []
-            left_mentions = []
-            right_mentions = []
+            left_mention_idxs = []
+            right_mention_idxs = []
             relation_spans = []
-            left_mention_masks = []
-            right_mention_masks = []
+            null_rel_spans = []
+            # left_mention_masks = []
+            # right_mention_masks = []
             moving_rel_idx = 0
+            # print '{} mentions'.format(len(boundaries))
             for i, b in enumerate(boundaries):
                 # mention feature is average of its span features
-                mention = ch.functions.sum(features[b[0]:b[1]], axis=0)
-                mention /= ch.functions.broadcast_to(ch.Variable(np.array(b[1]-b[0],
+                mention = F.sum(features[b[0]:b[1]], axis=0)
+                mention /= F.broadcast_to(ch.Variable(np.array(b[1]-b[0],
                                                              dtype=np.float32)),
                                                  mention.shape)
                 mentions.append(mention)
@@ -145,42 +163,40 @@ class Extractor(ch.Chain):
                 # make a relation to all previous mentions (M choose 2)
                 # except those that are further than max_rel_dist away
                 # (prune for speed, accuracy)
+                for j in range(i):
                 # for j in range(moving_rel_idx, i):
-                #     bj = boundaries[j]
-                #     if abs(bj[0] - b[0]) < self.max_rel_dist:
-                #         relation_spans.append((bj[0], bj[1], b[0], b[1]))
-                #         left_mentions.append(mentions[j])
-                #         right_mentions.append(mentions[i])
-                #         left_mention_masks.append(self.msubtype2rtype['left'][bj[2]])
-                #         right_mention_masks.append(self.msubtype2rtype['right'][b[2]])
-                #     # if that's too far, then it'll def be too far for the next
-                #     else:
-                #         moving_rel_idx = j
-            if mentions:
-                mentions = ch.functions.vstack(mentions)
-                mention_masks = ch.functions.vstack(mention_masks)
+                    # print j,i
+                    bj = boundaries[j]
+                    if abs(bj[0] - b[0]) < self.max_rel_dist:
+                        relation_spans.append((bj[0], bj[1], b[0], b[1]))
+                        left_mention_idxs.append(np.array(j).astype(np.int32))
+                        right_mention_idxs.append(np.array(i).astype(np.int32))
+                    # if that's too far, then it'll def be too far for the next
+                    else:
+                        null_rel_spans.append((bj[0], bj[1], b[0], b[1]))
+                        # moving_rel_idx = j
+
+            # convert list of mentions to matrix and append
+            mentions = F.vstack(mentions)
+            mention_masks = F.vstack(mention_masks)
             all_mentions.append(mentions)
             all_mention_masks.append(mention_masks)
             all_mention_spans.append(mention_spans)
 
-            if left_mentions:
-                left_mentions = ch.functions.vstack(left_mentions)
-                left_mention_masks = ch.functions.vstack(left_mention_masks)
-            all_left_mentions.append(left_mentions)
-            all_left_mention_masks.append(left_mention_masks)
-            if right_mentions:
-                right_mentions = ch.functions.vstack(right_mentions)
-                right_mention_masks = ch.functions.vstack(right_mention_masks)
-            all_right_mentions.append(right_mentions)
-            all_right_mention_masks.append(right_mention_masks)
+            # same for relations
+            left_mention_idxs = F.vstack(left_mention_idxs)
+            all_left_mention_idxs.append(left_mention_idxs)
+            right_mention_idxs = F.vstack(right_mention_idxs)
+            all_right_mention_idxs.append(right_mention_idxs)
             all_relation_spans.append(relation_spans)
+            all_null_rel_spans.append(null_rel_spans)
 
-        return (all_mentions, all_left_mentions, all_right_mentions,
-                all_mention_masks, all_left_mention_masks, all_right_mention_masks,
-                all_mention_spans, all_relation_spans)
+        return (all_mentions, all_mention_masks,
+                all_left_mention_idxs, all_right_mention_idxs,
+                all_mention_spans, all_relation_spans, all_null_rel_spans)
 
     def __call__(self, x_list, train=True, backprop_to_tagger=False):
-        drop = ch.functions.dropout
+        drop = F.dropout
         # first tag the doc
         tagger_preds, tagger_features = self.tagger.predict(x_list,
                                                             return_features=True)
@@ -191,14 +207,11 @@ class Extractor(ch.Chain):
 
         if self.shortcut_embeds:
             embeds = self.tagger.embeds
-            tagger_features = [ ch.functions.hstack([f,e])
+            tagger_features = [ F.hstack([f,e])
                                 for f,e in zip(tagger_features, embeds)]
 
-        # skip the tagger features and go from embeddings
-        # tagger_features = [drop(self.tagger.embed(x), self.dropout, train) for x in x_list]
 
         # do another layer of features on the tagger layer
-        # features = [ self.lstm(f) for f in tagger_features ]
         if self.bidirectional:
             # helper function
             def bilstm(inputs, lstm):
@@ -208,7 +221,7 @@ class Extractor(ch.Chain):
                     f_lstms.append(h_f)
                     b_lstms.append(h_b)
                 b_lstms = b_lstms[::-1]
-                return [ ch.functions.hstack([f,b]) for f,b in zip(f_lstms, b_lstms)]
+                return [ F.hstack([f,b]) for f,b in zip(f_lstms, b_lstms)]
             # run the layers of bilstms
             lstms = [ drop(h, self.dropout, train) for h in bilstm(tagger_features, self.lstms[0]) ]
             for lstm in self.lstms[1:]:
@@ -218,7 +231,7 @@ class Extractor(ch.Chain):
             for lstm in self.lstms[1:]:
                 lstms = [ drop(lstm(h), self.dropout, train) for h in lstms ]
 
-        f = ch.functions.leaky_relu
+        f = F.leaky_relu
         # rnn output layer
         lstms = [ drop(f(self.out(h)) , self.dropout, train) for h in lstms ]
 
@@ -227,35 +240,91 @@ class Extractor(ch.Chain):
             lstms = [ drop(f(self.mlp(h)) , self.dropout, train) for h in lstms ]
 
         # extract the information graph from the tagger
-        (mentions, l_mentions, r_mentions,
-         mention_masks, l_mention_masks, r_mention_masks,
-         m_spans, r_spans) = self._extract_graph( tagger_preds,lstms)
+        (mentions, mention_masks,
+        left_idxs, right_idxs,
+         m_spans, r_spans, null_r_spans) = self._extract_graph(tagger_preds,lstms)
         # print [m.shape for m in mentions]
-        # concat left and right mentions into one vector per relation
-        relations = [ ch.functions.concat(m, axis=1)
-                      if type(m[0]) is ch.Variable else m[0] # make sure its nonempty
-                      for m in zip(l_mentions, r_mentions) ]
 
-        # score mentions and relations
-        # additionally apply any type constraint masks
-        m_logits = [ mask * self.f_m(m) if type(m) is ch.Variable else []
-                     for m, mask in zip(mentions, mention_masks) ]
-        r_logits = [ l_mask * r_mask * self.f_r(r) if type(r) is ch.Variable else []
-                     for r, l_mask, r_mask
-                     in zip(relations, l_mention_masks, r_mention_masks) ]
-        return m_logits, r_logits, m_spans, r_spans
+        # score mentions and take predictions for relations
+        m_logits = [ self.f_m(m) for m in mentions ]
+
+        m_preds = [ F.argmax(masked_softmax(m, mask), axis=1).data.astype('float32').reshape((-1,1))
+                    for m, mask in zip(m_logits, mention_masks) ]
+        # print 'm pad count', [ np.sum(m == 0.) for m in m_preds]
+
+        # get features and type constraints for left and right mentions
+        embed_id = F.embed_id
+        left_mentions = [ embed_id(idxs, ms)
+                          for idxs, ms in zip(left_idxs, mentions) ]
+        right_mentions = [ embed_id(idxs, ms)
+                          for idxs, ms in zip(right_idxs, mentions) ]
+        left_masks = [ F.squeeze(embed_id(F.cast(embed_id(idxs, preds), 'int32'),
+                                self.left_masks))
+                       for idxs, preds in zip(left_idxs, m_preds) ]
+        right_masks = [ F.squeeze(embed_id(F.cast(embed_id(idxs, preds), 'int32'),
+                                 self.right_masks))
+                       for idxs, preds in zip(right_idxs, m_preds) ]
+        rel_masks = [ l_mask * r_mask for l_mask, r_mask in zip(left_masks, right_masks) ]
+
+        # concat left and right mentions into one vector per relation
+        relation_features = [ F.concat(ms, axis=1)
+                              for ms in zip(left_mentions, right_mentions) ]
+
+        # score relations
+        # print [ (np.sum(mask.data[:,0] != 0.), len(mask.data)) for mask in rel_masks ]
+        r_logits = [ self.f_r(r) for r in relation_features ]
+        # print 'shapes',[(mask.shape, r.shape) for mask, r in zip(rel_masks, r_logits)]
+        # print 'pad count', [(np.sum(mask.data[:,0] != 0), np.sum(r.data[:,0] != 0.))
+        #                      for mask, r in zip(rel_masks, r_logits)]
+        # r_logits = [ mask * self.f_r(r)
+        #              for r, mask in zip(relation_features, rel_masks) ]
+        # print 'r shapes', [(r.shape) for r in r_logits]
+        return m_logits, r_logits, mention_masks, rel_masks, m_spans, r_spans, null_r_spans
 
     def predict(self, x_list, reset_state=True):
         if reset_state:
             self.reset_state()
-        m_logits, r_logits, m_spans, r_spans = self(x_list)
-        m_preds = [ ch.functions.argmax(m, axis=1).data
-                    if type(m) is ch.Variable else []
-                    for m in m_logits ]
-        r_preds = [ ch.functions.argmax(r, axis=1).data
-                    if type(r) is ch.Variable else []
-                    for r in r_logits ]
+        m_logits, r_logits, m_masks, r_masks, m_spans, r_spans, null_r_spans = self(x_list)
+        m_preds = [ F.argmax(masked_softmax(m, mask), axis=1).data
+                    for m, mask in zip(m_logits, m_masks) ]
+        r_preds = [ F.argmax(masked_softmax(r, mask), axis=1).data
+                    for r, mask in zip(r_logits, r_masks) ]
+        # r_dists = [ F.softmax(r).data for r in r_logits]
+        # predict null for all mention pairs > max rel dist from eachother
+        # print 'masked pad count', [np.sum(r.data[:,0] != 0.) for r in r_logits]
+        # print 'zero r count', [np.sum(np.all(r.data == 0., axis=1)) for r in r_logits]
+        # pad_counts = [ (np.sum(r == 0), len(r)) for r in r_preds ]
+        # for c, p, d in zip(pad_counts, r_preds, r_dists):
+        #     if c:
+        #         for r, l in zip(p.tolist(), d.tolist()):
+        #             if r == 0:
+        #                 print 'label dist', l
+        r_preds = [ np.hstack([r, self.null_idx*np.ones(len(null_rs), dtype=np.int32)])
+                    for r, null_rs in zip(r_preds, null_r_spans)]
+        # print [ (np.sum(r == 0), len(r)) for r in r_preds ]
+        # print 'rpred shapes', [r.shape for r in r_preds]
+        r_spans = [ r+null_rs for r, null_rs in zip(r_spans, null_r_spans) ]
         return m_preds, r_preds, m_spans, r_spans
+
+    def report(self):
+        summary = {}
+        for link in self.children(): #links(skipself=True):
+            if link is not self.tagger:
+                for param in link.params():
+                    d = '{}/{}/{}'.format(link.name, param.name, 'data')
+                    summary[d] = param.data
+                    g = '{}/{}/{}'.format(link.name, param.name, 'grad')
+                    summary[g] = param.grad
+                    # print d,g
+            else:
+                for sublink in link.children():
+                    for param in sublink.params():
+                        d = 'tagger/{}/{}/{}'.format(sublink.name, param.name, 'data')
+                        summary[d] = param.data
+                        g = 'tagger/{}/{}/{}'.format(sublink.name, param.name, 'grad')
+                        summary[g] = param.grad
+                        # print d,g
+        return summary
 
 class ExtractorLoss(ch.Chain):
     def __init__(self, extractor):
@@ -265,7 +334,9 @@ class ExtractorLoss(ch.Chain):
 
     def __call__(self, x_list, gold_m_list, gold_r_list, **kwds):
         # extract the graph
-        men_logits, rel_logits, men_spans, rel_spans = self.extractor(x_list, **kwds)
+        (men_logits, rel_logits,
+        men_masks, rel_masks,
+        men_spans, rel_spans, null_rspans) = self.extractor(x_list, **kwds)
         # print zip([len(m) for m in men_logits], [len(r) for r in rel_logits])
         # compute loss per sequence
         mention_loss = relation_loss = 0
@@ -310,24 +381,30 @@ class ExtractorLoss(ch.Chain):
             # do the same for relations
             # but only if BOTH mention boundaries are correct
             # gold_rel_spans = set([r[:4] for r in gold_r])
-            # rel2label = {r[:4]:r[4] for r in gold_r}
-            # weights = []
-            # labels = []
-            # for r in r_spans:
-            #     # NOTE the following commented out conditional is buggy,
-            #     # but it should not be...
-            #     # there should be no relations whose spans are not gold mentions
-            #     if (r[:2] in gold_spans) and (r[2:4] in gold_spans):
-            #     # if r in gold_rel_spans:
-            #         weights.append(1.0)
-            #         labels.append(rel2label[r[:4]])
-            #     else:
-            #         weights.append(0.0)
-            #         labels.append(0)
-            # weights = np.array(weights, dtype=np.float32)
-            # labels = np.array(labels, dtype=np.int32)
-            # relation_loss += batch_weighted_softmax_cross_entropy(r_logits, labels,
-            #                                                      instance_weight=weights)
+            rel2label = {r[:4]:r[4] for r in gold_r}
+            weights = []
+            labels = []
+            for r in r_spans:
+                # NOTE the following commented out conditional is buggy,
+                # but it should not be...
+                # there should be no relations whose spans are not gold mentions
+                if (r[:2] in gold_spans) and (r[2:4] in gold_spans):
+                # if r in gold_rel_spans:
+                    weights.append(1.0)
+                    labels.append(rel2label[r[:4]])
+                else:
+                    weights.append(0.0)
+                    labels.append(0)
+            weights = np.array(weights, dtype=np.float32)
+            labels = np.array(labels, dtype=np.int32)
+            doc_relation_loss = batch_weighted_softmax_cross_entropy(r_logits, labels,
+                                                                 instance_weight=weights)
+            doc_relation_loss *= len(weights) / (np.sum(weights) + 1e15)
+            relation_loss += doc_relation_loss
+
         mention_loss /= batch_size
-        # relation_loss /= batch_size
-        return (mention_loss)# + relation_loss)
+        relation_loss /= batch_size
+        return (mention_loss + relation_loss)
+
+    def report(self):
+        return self.extractor.report()
