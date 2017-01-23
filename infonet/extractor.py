@@ -70,6 +70,8 @@ class Extractor(ch.Chain):
 
         # convert the typemaps to indicator array masks
         # mention type -> subtype uses the string label, so keep it as a dict
+        # for mtypes ('entity' and 'event-anchor') the indices
+        # are kept as the raw tokens.  theyre assembled
         for k,v in mtype2msubtype.items():
             mask = np.zeros(n_mention_class).astype(np.float32)
             mask[np.array(v)] = 1.
@@ -87,13 +89,7 @@ class Extractor(ch.Chain):
             right_masks[k, np.array(v)] = 1.
         self.left_masks = left_masks
         self.right_masks = right_masks
-        # print 'left and right relation masks', self.left_masks, self.right_masks
-        # print 'left mask'
-        # for m in self.left_masks:
-        #     print np.sum(m), m
-        # print 'right mask'
-        # for m in self.left_masks:
-        #     print np.sum(m), m
+
         # print self.mtype2msubtype
         # print
         # print self.msubtype2rtype
@@ -381,15 +377,12 @@ class ExtractorLoss(ch.Chain):
             # do the same for relations
             # but only if BOTH mention boundaries are correct
             # gold_rel_spans = set([r[:4] for r in gold_r])
+
             rel2label = {r[:4]:r[4] for r in gold_r}
             weights = []
             labels = []
             for r in r_spans:
-                # NOTE the following commented out conditional is buggy,
-                # but it should not be...
-                # there should be no relations whose spans are not gold mentions
                 if (r[:2] in gold_spans) and (r[2:4] in gold_spans):
-                # if r in gold_rel_spans:
                     weights.append(1.0)
                     labels.append(rel2label[r[:4]])
                 else:
