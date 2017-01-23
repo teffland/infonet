@@ -64,20 +64,25 @@ class Extractor(ch.Chain):
         self.max_rel_dist = max_rel_dist
 
         # convert the typemaps to indicator array masks
+        # for mtypes ('entity' and 'event-anchor') the indices
+        # are kept as the raw tokens.  theyre assembled
         for k,v in mtype2msubtype.items():
             mask = np.zeros(n_mention_class).astype(np.float32)
             mask[np.array(v)] = 1.
             mtype2msubtype[k] = mask
         self.mtype2msubtype = mtype2msubtype
+        # for the left and right relations indicator masks
+        # we extract them conditional on the mention predictions
+        # so these are converted to an indicator embeddings
+        left_masks = np.zeros((n_mention_class, n_relation_class))
         for k,v in msubtype2rtype['left'].items():
-            mask = np.zeros(n_relation_class).astype(np.float32)
-            mask[np.array(v)] = 1.
-            msubtype2rtype['left'][k] = mask
+            left_masks[k, np.array(v)] = 1.
+        right_masks = np.zeros((n_mention_class, n_relation_class))
         for k,v in msubtype2rtype['right'].items():
-            mask = np.zeros(n_relation_class).astype(np.float32)
-            mask[np.array(v)] = 1.
-            msubtype2rtype['right'][k] = mask
-        self.msubtype2rtype = msubtype2rtype
+            right_masks[k, np.array(v)] = 1.
+        self.left_masks = left_masks
+        self.right_masks = right_masks
+
         # print self.mtype2msubtype
         # print
         # print self.msubtype2rtype
@@ -151,8 +156,8 @@ class Extractor(ch.Chain):
                 #         relation_spans.append((bj[0], bj[1], b[0], b[1]))
                 #         left_mentions.append(mentions[j])
                 #         right_mentions.append(mentions[i])
-                #         left_mention_masks.append(self.msubtype2rtype['left'][bj[2]])
-                #         right_mention_masks.append(self.msubtype2rtype['right'][b[2]])
+                        left_mention_types.append(bj[2])
+                        right_mention_types.append(b[2])
                 #     # if that's too far, then it'll def be too far for the next
                 #     else:
                 #         moving_rel_idx = j
@@ -309,25 +314,29 @@ class ExtractorLoss(ch.Chain):
 
             # do the same for relations
             # but only if BOTH mention boundaries are correct
-            # gold_rel_spans = set([r[:4] for r in gold_r])
-            # rel2label = {r[:4]:r[4] for r in gold_r}
-            # weights = []
-            # labels = []
-            # for r in r_spans:
-            #     # NOTE the following commented out conditional is buggy,
-            #     # but it should not be...
-            #     # there should be no relations whose spans are not gold mentions
-            #     if (r[:2] in gold_spans) and (r[2:4] in gold_spans):
-            #     # if r in gold_rel_spans:
-            #         weights.append(1.0)
-            #         labels.append(rel2label[r[:4]])
-            #     else:
-            #         weights.append(0.0)
-            #         labels.append(0)
-            # weights = np.array(weights, dtype=np.float32)
-            # labels = np.array(labels, dtype=np.int32)
-            # relation_loss += batch_weighted_softmax_cross_entropy(r_logits, labels,
-            #                                                      instance_weight=weights)
+            gold_rel_spans = set([r[:4] for r in gold_r])
+            rel2label = {r[:4]:r[4] for r in gold_r}
+            weights = []
+            labels = []
+            for r in r_spans:
+                # NOTE the following commented out conditional is buggy,
+                # but it should not be...
+                # there should be no relations whose spans are not gold mentions
+                if (r[:2] in gold_spans) and (r[2:4] in gold_spans):
+                # if r[:4] in gold_rel_spans:
+                    weights.append(1.0)
+                    labels.append(rel2label[r[:4]])
+                else:
+                    weights.append(0.0)
+                    labels.append(0)
+            weights = np.array(weights, dtype=np.float32)
+            labels = np.array(labels, dtype=np.int32)
+            doc_relation_loss = batch_weighted_softmax_cross_entropy(r_logits,
+                                                                     labels,
+                                                                     instance_weight=weights)
+            doc_relation_loss *= len(weights) / (np.sum(weights) + 1e-15)
+            relation_loss += doc_relation_loss
+
         mention_loss /= batch_size
-        # relation_loss /= batch_size
-        return (mention_loss)# + relation_loss)
+        relation_loss /= batch_size
+        return (mention_loss + relation_loss)
