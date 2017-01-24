@@ -245,10 +245,6 @@ def train(dataset, tagger,
     print 'Done'
 
     print 'Evaluating...'
-    train_iter = SequenceIterator(zip(ix_train, ib_train, im_train), batch_size, repeat=True, shuffle=False)
-    dev_iter = SequenceIterator(zip(ix_dev, ib_dev, im_dev), batch_size, repeat=True, shuffle=False)
-    test_iter = SequenceIterator(zip(ix_test, ib_test, im_test), batch_size, repeat=True, shuffle=False)
-
     f1_stats = evaluate(extractor, train_iter, keep_raw=True)
     print_stats('Training', f1_stats)
     STATS['train_stats'] = f1_stats

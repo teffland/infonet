@@ -363,8 +363,8 @@ class ExtractorLoss(ch.Chain):
                     labels.append(0)
             weights = np.array(weights, dtype=np.float32)
             # print '-'*80
-            # print "{} true, {} pred, {} correct mentions".format(
-            #   len(gold_spans), len(m_spans), np.sum(weights))
+            print "{} true, {} pred, {} correct mention spans".format(
+              len(gold_spans), len(m_spans), np.sum(weights))
             # print len(gold_m), gold_m
             # print len(m_spans), m_spans
             labels = np.array(labels, dtype=np.int32)
@@ -389,6 +389,8 @@ class ExtractorLoss(ch.Chain):
                     weights.append(0.0)
                     labels.append(0)
             weights = np.array(weights, dtype=np.float32)
+            print "{} true, {} pred, {} correct relation spans".format(
+              len(gold_r), len(r_spans), np.sum(weights))
             labels = np.array(labels, dtype=np.int32)
             doc_relation_loss = batch_weighted_softmax_cross_entropy(r_logits, labels,
                                                                  instance_weight=weights)
