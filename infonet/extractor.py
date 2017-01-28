@@ -275,12 +275,21 @@ class Extractor(ch.Chain):
         # r_logits = [ mask * self.f_r(r)
         #              for r, mask in zip(relation_features, rel_masks) ]
         # print 'r shapes', [(r.shape) for r in r_logits]
-        return m_logits, r_logits, mention_masks, rel_masks, m_spans, r_spans, null_r_spans
+
+        return (tagger_preds,
+                m_logits, r_logits,
+                mention_masks, rel_masks,
+                m_spans, r_spans, null_r_spans)
 
     def predict(self, x_list, reset_state=True):
         if reset_state:
             self.reset_state()
-        m_logits, r_logits, m_masks, r_masks, m_spans, r_spans, null_r_spans = self(x_list)
+
+        (b_preds,
+        m_logits, r_logits,
+        m_masks, r_masks,
+        m_spans, r_spans, null_r_spans) = self(x_list)
+
         m_preds = [ F.argmax(masked_softmax(m, mask), axis=1).data
                     for m, mask in zip(m_logits, m_masks) ]
         r_preds = [ F.argmax(masked_softmax(r, mask), axis=1).data
@@ -300,7 +309,7 @@ class Extractor(ch.Chain):
         # print [ (np.sum(r == 0), len(r)) for r in r_preds ]
         # print 'rpred shapes', [r.shape for r in r_preds]
         r_spans = [ r+null_rs for r, null_rs in zip(r_spans, null_r_spans) ]
-        return m_preds, r_preds, m_spans, r_spans
+        return b_preds, m_preds, r_preds, m_spans, r_spans
 
     def report(self):
         summary = {}
@@ -349,7 +358,7 @@ class ExtractorLoss(ch.Chain):
             # To prevent degenerate solutions that force the tagger to not output
             # as many correct mentions (resulting in trivially lower loss),
             # we rescale the loss by (# true mentions / # correct mentions).
-            # Intuitively this creates a higher losses for less correct mentions
+            # Intuitively this creates higher losses for less correct mentions
             gold_spans = {m[:2] for m in gold_m}
             span2label = {m[:2]:m[2] for m in gold_m}
             weights = []

@@ -171,7 +171,7 @@ def mention_stats(m_preds, m_trues):
             stats[t]['support'] = s['tp'] + s['fp'] + s['fn']
     return stats
 
-def mention_relation_stats(m_preds, m_trues, r_preds, r_trues):
+def mention_relation_stats(m_trues, m_preds, r_trues, r_preds):
         stats = {'tp':0, 'fp':0, 'fn':0}
         stats['node'] = {'tp':0, 'fp':0, 'fn':0}
         stats['entity'] = {'tp':0, 'fp':0, 'fn':0}

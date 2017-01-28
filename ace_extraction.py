@@ -75,14 +75,17 @@ def train(dataset, tagger,
     # print tag_map
 
     # data
-    train_iter = SequenceIterator(zip(ix_train, im_train, ir_train), batch_size, repeat=True)
-    dev_iter = SequenceIterator(zip(ix_dev, im_dev, ir_dev), batch_size, repeat=True)
-    test_iter = SequenceIterator(zip(ix_test, im_test, ir_test), batch_size, repeat=True)
+    train_iter = SequenceIterator(zip(ix_train, ib_train, im_train, ir_train),
+        batch_size, repeat=True)
+    dev_iter = SequenceIterator(zip(ix_dev, ib_dev, im_dev, ir_dev),
+        batch_size, repeat=True)
+    test_iter = SequenceIterator(zip(ix_test, ib_test, im_test, ir_test),
+        batch_size, repeat=True)
 
     # model
     extractor = Extractor(tagger,
                           mention_vocab.v, relation_vocab.v,
-                          relation_vocab.idx(u'--NULL--'),
+                          null_idx=relation_vocab.idx(u'--NULL--'),
                           lstm_size=lstm_size,
                           use_mlp=use_mlp,
                           bidirectional=bidirectional,
@@ -102,13 +105,17 @@ def train(dataset, tagger,
                  mention_vocab=mention_vocab,
                  relation_vocab=relation_vocab,
                  keep_raw=False):
-        all_xs, all_ms, all_mpreds, all_rs, all_rpreds = [], [], [], [], []
+        all_xs = []
+        all_bs, all_bpreds = [], []
+        all_ms, all_mpreds = [], []
+        all_rs, all_rpreds = [], []
         for batch in batch_iter:
-            x_list, m_list, r_list = zip(*batch)
+            x_list, b_list, m_list, r_list = zip(*batch)
+            all_xs.extend(x_list)
             all_ms.extend(m_list)
             all_rs.extend(r_list)
-            m_preds, r_preds, m_spans, r_spans = extractor.predict(sequences2arrays(x_list))
-            all_xs.extend(x_list)
+            b_preds, m_preds, r_preds, m_spans, r_spans = extractor.predict(sequences2arrays(x_list))
+            all_bs.extend(b_preds)
             mp_list = [ [ (s[0],s[1], p) for p,s in zip(preds, spans)]
                         for preds,spans in zip(m_preds, m_spans)]
             all_mpreds.extend(mp_list)
@@ -122,6 +129,8 @@ def train(dataset, tagger,
         #         for rpreds in all_rpreds]
         # print [(len(rs), len(rpreds)) for rs, rpreds in zip(all_rs, all_rpreds)]
         all_xs = convert_sequences(all_xs, token_vocab.token)
+        all_bs = convert_sequences(all_bs, boundary_vocab.token)
+        all_bpreds = convert_sequences(all_bpreds, boundary_vocab.token)
         convert_mention = lambda x: x[:-1]+(mention_vocab.token(x[-1]),) # type is last
         all_ms = convert_sequences(all_ms, convert_mention)
         all_mpreds = convert_sequences(all_mpreds, convert_mention)
@@ -130,7 +139,8 @@ def train(dataset, tagger,
         all_rpreds = convert_sequences(all_rpreds, convert_relation)
         # m_f1_stats = mention_stats(all_mpreds, all_ms)
         # r_f1_stats = relation_stats(all_rpreds, all_rs)
-        f1_stats = mention_relation_stats(all_mpreds, all_ms, all_rpreds, all_rs)
+        f1_stats.update(mention_boundary_stats(all_bs, all_bpreds))
+        f1_stats = mention_relation_stats(all_ms, all_mpreds, all_rs, all_rpreds)
         if keep_raw:
             # m_f1_stats['xs'] = all_xs
             # m_f1_stats['m_preds'] = all_mpreds
@@ -139,6 +149,8 @@ def train(dataset, tagger,
             # r_f1_stats['r_preds'] = all_rpreds
             # r_f1_stats['r_trues'] = all_rs
             f1_stats['xs'] = all_xs
+            f1_stats['b_preds'] = all_bpreds
+            f1_stats['b_trues'] = all_bs
             f1_stats['m_preds'] = all_mpreds
             f1_stats['m_trues'] = all_ms
             f1_stats['r_preds'] = all_rpreds
