@@ -95,7 +95,6 @@ def train(dataset, tagger,
                           use_mlp=use_mlp,
                           bidirectional=bidirectional,
                           shortcut_embeds=shortcut_embeds,
-                          backprop_to_tagger=backprop,
                           start_tags=start_tags, in_tags=in_tags, out_tags=out_tags,
                           tag2mtype=tag2mtype,
                           mtype2msubtype=mtype2msubtype,
@@ -207,7 +206,7 @@ def train(dataset, tagger,
             # run model
             start = time.time()
             loss = extractor_loss(x_list, m_list, r_list,
-                                  backprop_to_tagger=backprop_to_tagger)
+                                  backprop_to_tagger=backprop)
             STATS['forward_times'].append(time.time()-start)
             loss_val = np.asscalar(loss.data)
             print_batch_loss(loss_val,
