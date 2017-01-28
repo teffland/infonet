@@ -190,8 +190,8 @@ def mention_relation_stats(m_trues, m_preds, r_trues, r_preds):
         stats['edge'] = {'tp':0, 'fp':0, 'fn':0}
         stats['relation'] = {'tp':0, 'fp':0, 'fn':0}
         stats['event-argument'] = {'tp':0, 'fp':0, 'fn':0}
-        # stats['coreference'] = {'tp':0, 'fp':0, 'fn':0}
-        # stats['NULL'] = {'tp':0, 'fp':0, 'fn':0}
+        stats['coreference'] = {'tp':0, 'fp':0, 'fn':0}
+        stats['NULL'] = {'tp':0, 'fp':0, 'fn':0}
         # nodes
         for m_pred, m_true in zip(m_preds, m_trues):
             m_pred = set(m_pred)
@@ -293,11 +293,13 @@ def mention_relation_stats(m_trues, m_preds, r_trues, r_preds):
                     # print 'tp event-anchor'
                     stats['event-argument']['tp'] += 1
                 elif 'coreference' in rtype:
+                    pass
                     # print 'tp event-anchor'
-                    stats['coreference']['tp'] += 1
+                    # stats['coreference']['tp'] += 1
                 elif 'NULL' in rtype:
+                    pass
                     # print 'tp event-anchor'
-                    stats['NULL']['tp'] += 1
+                    # stats['NULL']['tp'] += 1
                 else:
                     print "invalid r type found in tp {}".format(rtype)
             for r in fp:

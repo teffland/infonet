@@ -48,8 +48,8 @@ class Extractor(ch.Chain):
             tagger=tagger,
             mlp = L.Linear(feature_size, feature_size),
             out=L.Linear(feature_size, feature_size),
-            f_m=L.Linear(feature_size, n_mention_class),
-            f_r=L.Linear(2*feature_size, n_relation_class)
+            f_m=L.Linear(feature_size+1, n_mention_class),
+            f_r=L.Linear(2*feature_size+3, n_relation_class)
         )
         self.lstms = lstms
         for i, lstm in enumerate(self.lstms):
@@ -175,13 +175,15 @@ class Extractor(ch.Chain):
             # convert list of mentions to matrix and append
             mentions = F.vstack(mentions)
             # add in span widths as features
-            m_dists = np.array(mention_spans).astype(np.float32)
-            m_dists = np.array([ s[1]-s[0] for s in mention_spans ] ).astype(np.float32)
-            mentions = F.hstack([mentions, ch.Variable(m_dists))
+            m_spans = np.array(mention_spans).astype(np.float32)
+            m_wids = m_spans[:,1]-m_spans[:,0]
+            m_wids  = m_wids.reshape((-1,1))
+            # m_dists = np.array([ s[1]-s[0] for s in mention_spans ] ).astype(np.float32).reshape((-1,1))
+            mentions = F.hstack([mentions, ch.Variable(m_wids)])
             mention_masks = F.vstack(mention_masks)
             all_mentions.append(mentions)
             all_mention_masks.append(mention_masks)
-            all_mention_spans.append(mention_spans)
+            all_mention_spans.append(m_spans)
 
             # same for relations
             left_mention_idxs = F.vstack(left_mention_idxs)
@@ -254,10 +256,15 @@ class Extractor(ch.Chain):
 
         # get features and type constraints for left and right mentions
         embed_id = F.embed_id
-        left_mentions = [ embed_id(idxs, ms)
+        left_mentions = [ F.squeeze(embed_id(idxs, ms))
                           for idxs, ms in zip(left_idxs, mentions) ]
-        right_mentions = [ embed_id(idxs, ms)
+        right_mentions = [ F.squeeze(embed_id(idxs, ms))
                           for idxs, ms in zip(right_idxs, mentions) ]
+
+        mention_dists = [ F.reshape(F.squeeze(embed_id(r_idxs, mspan)
+                          - embed_id(l_idxs, mspan), axis=1)[:,0], (-1,1))
+                          for l_idxs, r_idxs, mspan in zip(left_idxs, right_idxs, m_spans)]
+        # print embed_id(right_idxs[0], m_spans[0]).shape, mention_dists[0].shape, left_mentions[0].shape, right_mentions[0].shape
         left_masks = [ F.squeeze(embed_id(F.cast(embed_id(idxs, preds), 'int32'),
                                 self.left_masks))
                        for idxs, preds in zip(left_idxs, m_preds) ]
@@ -267,8 +274,8 @@ class Extractor(ch.Chain):
         rel_masks = [ l_mask * r_mask for l_mask, r_mask in zip(left_masks, right_masks) ]
 
         # concat left and right mentions into one vector per relation
-        relation_features = [ F.concat(ms, axis=1)
-                              for ms in zip(left_mentions, right_mentions) ]
+        relation_features = [ F.hstack(ms)
+                              for ms in zip(left_mentions, right_mentions, mention_dists) ]
 
         # score relations
         # print [ (np.sum(mask.data[:,0] != 0.), len(mask.data)) for mask in rel_masks ]
@@ -280,6 +287,8 @@ class Extractor(ch.Chain):
         #              for r, mask in zip(relation_features, rel_masks) ]
         # print 'r shapes', [(r.shape) for r in r_logits]
 
+        # convert mention spans to lists
+        m_spans = [tuple([tuple(mspan) for mspan in mspans.tolist() ]) for mspans in m_spans]
         return (tagger_preds,
                 m_logits, r_logits,
                 mention_masks, rel_masks,
@@ -408,7 +417,7 @@ class ExtractorLoss(ch.Chain):
             labels = np.array(labels, dtype=np.int32)
             doc_relation_loss = batch_weighted_softmax_cross_entropy(r_logits, labels,
                                                                  instance_weight=weights)
-            doc_relation_loss *= len(weights) / (np.sum(weights) + 1e15)
+            doc_relation_loss *= len(weights) / (np.sum(weights) + 1e-15)
             relation_loss += doc_relation_loss
 
         mention_loss /= batch_size

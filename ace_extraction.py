@@ -147,7 +147,7 @@ def train(dataset, tagger,
         # r_f1_stats = relation_stats(all_rpreds, all_rs)
         f1_stats = mention_relation_stats(all_ms, all_mpreds, all_rs, all_rpreds)
         f1_stats.update({'tag-'+k:v for k,v in
-                         mention_boundary_stats(all_bs, all_bpreds, **tag_map)})
+                         mention_boundary_stats(all_bs, all_bpreds, **tag_map).items()})
         if keep_raw:
             # m_f1_stats['xs'] = all_xs
             # m_f1_stats['m_preds'] = all_mpreds
