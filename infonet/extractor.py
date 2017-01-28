@@ -174,6 +174,10 @@ class Extractor(ch.Chain):
 
             # convert list of mentions to matrix and append
             mentions = F.vstack(mentions)
+            # add in span widths as features
+            m_dists = np.array(mention_spans).astype(np.float32)
+            m_dists = np.array([ s[1]-s[0] for s in mention_spans ] ).astype(np.float32)
+            mentions = F.hstack([mentions, ch.Variable(m_dists))
             mention_masks = F.vstack(mention_masks)
             all_mentions.append(mentions)
             all_mention_masks.append(mention_masks)
@@ -373,8 +377,8 @@ class ExtractorLoss(ch.Chain):
                     labels.append(0)
             weights = np.array(weights, dtype=np.float32)
             # print '-'*80
-            print "{} true, {} pred, {} correct mention spans".format(
-              len(gold_spans), len(m_spans), np.sum(weights))
+            # print "{} true, {} pred, {} correct mention spans".format(
+            #   len(gold_spans), len(m_spans), np.sum(weights))
             # print len(gold_m), gold_m
             # print len(m_spans), m_spans
             labels = np.array(labels, dtype=np.int32)
@@ -399,8 +403,8 @@ class ExtractorLoss(ch.Chain):
                     weights.append(0.0)
                     labels.append(0)
             weights = np.array(weights, dtype=np.float32)
-            print "{} true, {} pred, {} correct relation spans".format(
-              len(gold_r), len(r_spans), np.sum(weights))
+            # print "{} true, {} pred, {} correct relation spans".format(
+            #   len(gold_r), len(r_spans), np.sum(weights))
             labels = np.array(labels, dtype=np.int32)
             doc_relation_loss = batch_weighted_softmax_cross_entropy(r_logits, labels,
                                                                  instance_weight=weights)
