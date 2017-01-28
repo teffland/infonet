@@ -93,7 +93,7 @@ def mention_boundary_stats(true_ys, pred_ys, **kwds):
                     stats['event-anchor']['fp'] += s[t]['fp']
                     stats['event-anchor']['fn'] += s[t]['fn']
                 else:
-                    print "invalid m type found {}".format(t)
+                    print "invalid b type found {}".format(t)
     stats['precision'] = stats['tp'] / float(stats['tp'] + stats['fp'] +1e-15)
     stats['recall'] = stats['tp'] / float(stats['tp'] + stats['fn'] +1e-15)
     stats['f1'] = 2*stats['precision']*stats['recall']/(stats['precision']+stats['recall']+1e-15)

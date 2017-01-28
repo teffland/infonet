@@ -18,6 +18,11 @@ from infonet.evaluation import mention_boundary_stats, mention_relation_stats
 
 def dump_stats(STATS, model_name):
     print "Dumping stats for {}...".format(model_name),
+    # write out stats that how to configure (instantiate) a model
+    stats = {k:v for k,v in STATS.items()
+             if k in ('args', 'model_name')}
+    with open('experiments/{}_config.json'.format(model_name), 'w') as f:
+        f.write(json.dumps(stats)+'\n')
     # write out stats that involve evaluation of model
     stats = {k:v for k,v in STATS.items()
              if 'stats' in k}
@@ -312,13 +317,13 @@ def parse_args():
 def load_dataset_and_tagger(arg_dict):
     # load in the tagger options
     print "Loading stats"
-    with open('experiments/{}_report_stats.json'.format(arg_dict['tagger_f']), 'r') as f:
+    model_name = arg_dict['tagger_f']
+    with open('experiments/{}_config.json'.format(model_name), 'r') as f:
         for line in f:
             tagger_stats = json.loads(line)
             break # only need first log
     tagger_args = tagger_stats['args']
     print "Tagger args: ", tagger_args
-    model_name = tagger_stats['model_name']
     # load in dataset (need this to create the tagger)
     dataset = get_ace_extraction_data(**tagger_args)
     # create and load the actual tagger

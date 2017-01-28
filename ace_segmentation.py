@@ -18,6 +18,11 @@ from infonet.word_vectors import get_pretrained_vectors
 
 def dump_stats(STATS, model_name):
     print "Dumping stats for {}...".format(model_name),
+    # write out stats that how to configure (instantiate) a model
+    stats = {k:v for k,v in STATS.items()
+             if k in ('args', 'model_name')}
+    with open('experiments/{}_config.json'.format(model_name), 'w') as f:
+        f.write(json.dumps(stats)+'\n')
     # write out stats that involve evaluation of model
     stats = {k:v for k,v in STATS.items()
              if 'stats' in k}
