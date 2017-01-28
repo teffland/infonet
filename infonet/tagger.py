@@ -1,5 +1,7 @@
 import numpy as np
 import chainer as ch
+import chainer.functions as F
+import chainer.links as L
 from util import SequenceIterator, sequences2arrays
 from crf_linear import LinearChainCRF
 from gru import GRU, BidirectionalGRU
@@ -11,20 +13,22 @@ class Tagger(ch.Chain):
                  bidirectional=False,
                  use_mlp=False,
                  dropout=.25,
+                 use_hdropout=False,
                  n_layers=1,
                  crf_type='none'):
         # setup rnn layer
+        hdropout = dropout if use_hdropout else 0.0
         if bidirectional:
             feature_size = 2*lstm_size
             lstms = [BidirectionalGRU(lstm_size, n_inputs=embeddings.shape[1],
-                                      dropout=dropout)]
+                                      dropout=hdropout)]
             for i in range(1,n_layers):
-                lstms.append(BidirectionalGRU(lstm_size, n_inputs=feature_size, dropout=dropout))
+                lstms.append(BidirectionalGRU(lstm_size, n_inputs=feature_size, dropout=hdropout))
         else:
             feature_size = lstm_size
-            lstms = [GRU(lstm_size, n_inputs=embeddings.shape[1], dropout=dropout)]
+            lstms = [GRU(lstm_size, n_inputs=embeddings.shape[1], dropout=hdropout)]
             for i in range(1,n_layers):
-                lstms.append(GRU(lstm_size, n_inputs=feature_size, dropout=dropout))
+                lstms.append(GRU(lstm_size, n_inputs=feature_size, dropout=hdropout))
 
         # setup crf layer
         if crf_type in 'none':
@@ -34,11 +38,11 @@ class Tagger(ch.Chain):
             self.crf_type = crf_type
 
         super(Tagger, self).__init__(
-            embed = ch.links.EmbedID(embeddings.shape[0], embeddings.shape[1],
+            embed = L.EmbedID(embeddings.shape[0], embeddings.shape[1],
                                      embeddings),
-            mlp = ch.links.Linear(feature_size, feature_size),
-            out = ch.links.Linear(feature_size, feature_size),
-            logit = ch.links.Linear(feature_size, out_size),
+            mlp = L.Linear(feature_size, feature_size),
+            out = L.Linear(feature_size, feature_size),
+            logit = L.Linear(feature_size, out_size),
             crf = LinearChainCRF(out_size, feature_size, crf_type)
         )
         self.lstms = lstms
@@ -51,14 +55,17 @@ class Tagger(ch.Chain):
         self.dropout = dropout
         self.bidirectional = bidirectional
         self.use_mlp = use_mlp
+        self.use_hdropout = use_hdropout
 
     def reset_state(self):
         for lstm in self.lstms:
             lstm.reset_state()
 
     def __call__(self, x_list, train=True, return_logits=False):
-        drop = ch.functions.dropout
+        drop = F.dropout
         self.embeds = [ drop(self.embed(x), self.dropout, train) for x in x_list ]
+
+        # run lstm layer over embeddings
         if self.bidirectional:
             # helper function
             def bilstm(inputs, lstm):
@@ -68,17 +75,30 @@ class Tagger(ch.Chain):
                     f_lstms.append(h_f)
                     b_lstms.append(h_b)
                 b_lstms = b_lstms[::-1]
-                return [ ch.functions.hstack([f,b]) for f,b in zip(f_lstms, b_lstms) ]
-            # run the layers of bilstms
-            lstms = [ drop(h, self.dropout, train) for h in bilstm(self.embeds, self.lstms[0]) ]
-            for lstm in self.lstms[1:]:
-                lstms = [ drop(h, self.dropout, train) for h in bilstm(lstms, lstm) ]
-        else:
-            lstms = [ drop(self.lstms[0](x, train=train), self.dropout, train) for x in self.embeds ]
-            for lstm in self.lstms[1:]:
-                lstms = [ drop(lstm(h, train=train), self.dropout, train) for h in lstms ]
+                return [ F.hstack([f,b]) for f,b in zip(f_lstms, b_lstms) ]
 
-        f = ch.functions.leaky_relu
+            # run the layers of bilstms
+            # don't dropout h twice if using horizontal dropout
+            if self.use_hdropout:
+                lstms = [ h for h in bilstm(self.embeds, self.lstms[0]) ]
+                for lstm in self.lstms[1:]:
+                    lstms = [ h for h in bilstm(lstms, lstm) ]
+            else:
+                lstms = [ drop(h, self.dropout, train) for h in bilstm(self.embeds, self.lstms[0]) ]
+                for lstm in self.lstms[1:]:
+                    lstms = [ drop(h, self.dropout, train) for h in bilstm(lstms, lstm) ]
+        else:
+            if self.use_hdropout:
+                lstms = [ self.lstms[0](x, train=train) for x in self.embeds ]
+                for lstm in self.lstms[1:]:
+                    lstms = [ lstm(h, train=train) for h in lstms ]
+            else:
+                lstms = [ drop(self.lstms[0](x, train=train), self.dropout, train) for x in self.embeds ]
+                for lstm in self.lstms[1:]:
+                    lstms = [ drop(lstm(h, train=train), self.dropout, train) for h in lstms ]
+
+
+        f = F.leaky_relu
         # rnn output layer
         lstms = [ drop(f(self.out(h)), self.dropout, train) for h in lstms]
 

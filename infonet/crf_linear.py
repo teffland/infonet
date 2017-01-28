@@ -11,20 +11,23 @@ http://docs.chainer.org/en/stable/_modules/chainer/links/loss/crf1d.html#CRF1d
 """
 import numpy as np
 import numpy.random as npr
-from chainer import link, Variable
-from chainer.functions.array import broadcast
-from chainer.functions.array import concat
-from chainer.functions.array import reshape
-from chainer.functions.array import select_item
-from chainer.functions.array import split_axis
-from chainer.functions.array import hstack
-from chainer.functions.connection import embed_id
-from chainer.functions.connection import linear, bilinear
-from chainer.functions.math import logsumexp
-from chainer.functions.math import minmax
-from chainer.functions.math import sum as _sum
-from chainer.functions.math import matmul
 import chainer as ch
+import chainer.functions as F
+# import chainer.links as L
+from chainer import link, Variable
+# from chainer.functions.array import broadcast
+# from chainer.functions.array import concat
+# from chainer.functions.array import reshape
+# from chainer.functions.array import select_item
+# from chainer.functions.array import split_axis
+# from chainer.functions.array import hstack
+# from chainer.functions.connection import embed_id
+# from chainer.functions.connection import linear, bilinear
+# from chainer.functions.math import logsumexp
+# from chainer.functions.math import minmax
+# from chainer.functions.math import sum as _sum
+# from chainer.functions.math import matmul
+# import chainer as ch
 
 class LinearChainCRF(link.Link):
     """Linear-chain conditional random field loss layer.
@@ -85,24 +88,32 @@ class LinearChainCRF(link.Link):
                 # deal with sorted variable length sequences
                 if xj.shape[0] < xi.shape[0]:
                     # alpha, alpha_rest = split_axis.split_axis(alpha, [batch], axis=0)
-                    xi, _ = split_axis.split_axis(xi, [xj.shape[0]], axis=0)
+                    xi, _ = F.split_axis(xi, [xj.shape[0]], axis=0)
                 if self.param_type == 'linear':
-                    x = hstack.hstack([xi,xj])
-                    f = matmul.matmul(x, self.trans_cost)
+                    x = F.hstack([xi,xj])
+                    f = F.matmul(x, self.trans_cost)
                 elif self.param_type == 'simple_bilinear':
                     x = xi * xj # elementwise product, dotted with trans costs
-                    f = matmul.matmul(x, self.trans_cost)
+                    f = F.matmul(x, self.trans_cost)
+                    print f.shape
                 elif self.param_type == 'bilinear':
-                    f = bilinear.bilinear(xi, xj, self.trans_cost)
+                    # bilinear is x1^T A_c x2 for each c in labels
+                    b_xi = F.broadcast_to(xi, (self.n_label**2,)+xi.shape)
+                    b_xj = F.broadcast_to(xj, (self.n_label**2,)+xj.shape)
+                    xi_A = F.batch_matmul(b_xi, F.transpose(self.trans_cost, (2,0,1)))
+                    f = F.transpose(F.sum(xi_A * b_xj, axis=2))
+
+                    # print f.shape
+                    # f = F.bilinear(xi, xj, self.trans_cost)
                 # bias = broadcast.broadcast_to(self.trans_bias, f.shape)
                 # f += bias
-                f = ch.functions.bias(f, self.trans_bias)
-                f = reshape.reshape(f, (-1, self.n_label, self.n_label))
+                f = F.bias(f, self.trans_bias)
+                f = F.reshape(f, (-1, self.n_label, self.n_label))
                 costs.append(f)
             return costs
 
     def calc_uni_cost(self, xs):
-        return [ linear.linear(x, self.uni_cost, self.uni_bias) for x in xs]
+        return [ F.linear(x, self.uni_cost, self.uni_bias) for x in xs]
 
     def __call__(self, xs, ys):
         trans_costs = self.calc_trans_cost(xs)
@@ -225,18 +236,18 @@ def crf1d(trans_costs, xs, ys):
     for x, cost in zip(xs[1:], trans_costs):
         batch = x.shape[0]
         if alpha.shape[0] > batch:
-            alpha, alpha_rest = split_axis.split_axis(alpha, [batch], axis=0)
+            alpha, alpha_rest = F.split_axis(alpha, [batch], axis=0)
             alphas.append(alpha_rest)
-        b_alpha, b_cost = broadcast.broadcast(alpha[..., None], cost)
-        alpha = logsumexp.logsumexp(b_alpha + b_cost, axis=1) + x
+        b_alpha, b_cost = F.broadcast(alpha[..., None], cost)
+        alpha = F.logsumexp(b_alpha + b_cost, axis=1) + x
 
     if len(alphas) > 0:
         alphas.append(alpha)
-        alpha = concat.concat(alphas[::-1], axis=0)
+        alpha = F.concat(alphas[::-1], axis=0)
 
-    logz = logsumexp.logsumexp(alpha, axis=1)
+    logz = F.logsumexp(alpha, axis=1)
 
-    score = select_item.select_item(xs[0], ys[0])
+    score = F.select_item(xs[0], ys[0])
     scores = []
     for x, y, y_prev, cost in zip(xs[1:], ys[1:], ys[:-1], trans_costs):
         batch = x.shape[0]
@@ -246,21 +257,21 @@ def crf1d(trans_costs, xs, ys):
             batch_offset = Variable(np.arange(batch, dtype=y.dtype)*n_label*n_label)
         else:
             batch_offset = Variable(np.zeros(batch, dtype=y.dtype))
-        cost = reshape.reshape(cost, (cost.size, 1)) #  batch x n_label x n_label, 1
+        cost = F.reshape(cost, (cost.size, 1)) #  batch x n_label x n_label, 1
         if score.shape[0] > batch:
-            y_prev, _ = split_axis.split_axis(y_prev, [batch], axis=0)
-            score, score_rest = split_axis.split_axis(score, [batch], axis=0)
+            y_prev, _ = F.split_axis(y_prev, [batch], axis=0)
+            score, score_rest = F.split_axis(score, [batch], axis=0)
             scores.append(score_rest)
-        score += (select_item.select_item(x, y)
-                  + reshape.reshape(
-                      embed_id.embed_id(y_prev * n_label + y + batch_offset, cost),
+        score += (F.select_item(x, y)
+                  + F.reshape(
+                      F.embed_id(y_prev * n_label + y + batch_offset, cost),
                       (batch,)))
 
     if len(scores) > 0:
         scores.append(score)
-        score = concat.concat(scores[::-1], axis=0)
+        score = F.concat(scores[::-1], axis=0)
 
-    return _sum.sum(logz - score) / n_batch
+    return F.sum(logz - score) / n_batch
 
 
 
@@ -298,29 +309,29 @@ def argmax_crf1d(trans_costs, xs):
     for x, cost in zip(xs[1:], trans_costs):
         batch = x.shape[0]
         if alpha.shape[0] > batch:
-            alpha, alpha_rest = split_axis.split_axis(alpha, [batch], axis=0)
+            alpha, alpha_rest = F.split_axis(alpha, [batch], axis=0)
             alphas.append(alpha_rest)
         else:
             alphas.append(None)
-        b_alpha, b_cost = broadcast.broadcast(alpha[..., None], cost)
+        b_alpha, b_cost = F.broadcast(alpha[..., None], cost)
         scores = b_alpha + b_cost
-        max_ind = minmax.argmax(scores, axis=1)
+        max_ind = F.argmax(scores, axis=1)
         max_inds.append(max_ind)
-        alpha = minmax.max(scores, axis=1) + x
+        alpha = F.max(scores, axis=1) + x
 
-    inds = minmax.argmax(alpha, axis=1)
+    inds = F.argmax(alpha, axis=1)
     path = [inds.data]
     for m, a in zip(max_inds[::-1], alphas[::-1]):
-        inds = select_item.select_item(m, inds)
+        inds = F.select_item(m, inds)
         if a is not None:
-            inds = concat.concat([inds, minmax.argmax(a, axis=1)], axis=0)
+            inds = F.concat([inds, F.argmax(a, axis=1)], axis=0)
         path.append(inds.data)
     path.reverse()
 
-    score = minmax.max(alpha, axis=1)
+    score = F.max(alpha, axis=1)
     for a in alphas[::-1]:
         if a is None:
             continue
-        score = concat.concat([score, minmax.max(a, axis=1)], axis=0)
+        score = F.concat([score, F.max(a, axis=1)], axis=0)
 
     return score, path

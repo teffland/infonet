@@ -55,9 +55,12 @@ def All_typed_BIO_map(mention_labels, annotation):
     return mention_labels
 
 def E_typed_BIO_map(mention_labels, annotation):
-    """ Uses BIO scheme (typed) for entities only """
+    """ Uses BIO scheme (typed) for entities and event anchors only """
     if annotation['node-type'] in ('entity', 'event-anchor'):
-        mention_type = annotation['type']
+        if annotation['node-type'] == 'entity':
+            mention_type = annotation['type']
+        else:
+            mention_type = annotation['subtype']
         left, right = tuple(annotation['ann-span'])
         mention_labels[left] = 'B-'+annotation['node-type']+'-'+mention_type
         for i in range(1, right-left):
