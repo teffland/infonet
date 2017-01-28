@@ -339,7 +339,8 @@ class ExtractorLoss(ch.Chain):
 
     def __call__(self, x_list, gold_m_list, gold_r_list, **kwds):
         # extract the graph
-        (men_logits, rel_logits,
+        (b_preds,
+        men_logits, rel_logits,
         men_masks, rel_masks,
         men_spans, rel_spans, null_rspans) = self.extractor(x_list, **kwds)
         # print zip([len(m) for m in men_logits], [len(r) for r in rel_logits])

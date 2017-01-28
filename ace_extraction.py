@@ -144,8 +144,8 @@ def train(dataset, tagger,
         all_rpreds = convert_sequences(all_rpreds, convert_relation)
         # m_f1_stats = mention_stats(all_mpreds, all_ms)
         # r_f1_stats = relation_stats(all_rpreds, all_rs)
-        f1_stats.update(mention_boundary_stats(all_bs, all_bpreds))
         f1_stats = mention_relation_stats(all_ms, all_mpreds, all_rs, all_rpreds)
+        f1_stats.update(mention_boundary_stats(all_bs, all_bpreds, **tag_map))
         if keep_raw:
             # m_f1_stats['xs'] = all_xs
             # m_f1_stats['m_preds'] = all_mpreds
@@ -194,7 +194,7 @@ def train(dataset, tagger,
         for batch in train_iter:
             STATS['epoch'] = train_iter.epoch
             # prepare data and model
-            x_list, m_list, r_list = zip(*batch)
+            x_list, b_list, m_list, r_list = zip(*batch)
             x_list = sequences2arrays(x_list)
             extractor.reset_state()
             extractor_loss.cleargrads()
