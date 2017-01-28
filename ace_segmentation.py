@@ -35,7 +35,8 @@ def train(dataset, STATS, model_name,
           embedding_size, lstm_size, learning_rate,
           crf_type, dropout,
           weight_decay, grad_clip,
-          bidirectional, use_mlp, n_layers,
+          bidirectional, use_mlp,
+          n_layers, use_hdropout,
           w2v_fname='',
           eval_only=False,
           **kwds):
@@ -64,7 +65,7 @@ def train(dataset, STATS, model_name,
     m_test = dataset['m_test']
 
     print tag_map
-
+    print len(tag_map['tag2mtype']), ' output labels'
     train_iter = SequenceIterator(zip(ix_train, ib_train, im_train), batch_size, repeat=True)
     dev_iter = SequenceIterator(zip(ix_dev, ib_dev, im_dev), batch_size, repeat=True)
     test_iter = SequenceIterator(zip(ix_test, ib_test, im_test), batch_size, repeat=True)
@@ -91,6 +92,7 @@ def train(dataset, STATS, model_name,
                     crf_type=crf_type,
                     dropout=dropout,
                     bidirectional=bidirectional,
+                    use_hdropout=use_hdropout,
                     use_mlp=use_mlp,
                     n_layers=n_layers)
     model_loss = TaggerLoss(tagger)
@@ -201,12 +203,14 @@ def train(dataset, STATS, model_name,
         return STATS
 
     def print_stats(name, f1_stats):
-        print "{}:: P: {s[precision]:2.4f}, R: {s[recall]:2.4f}, F1: {s[f1]:2.4f}".format(
+        print "{} :: P: {s[precision]:2.4f} R: {s[recall]:2.4f} F1: {s[f1]:2.4f} \
+ tp:{s[tp]} fp:{s[fp]} fn:{s[fn]} support:{s[support]}".format(
                 name, s=f1_stats)
-        for t,s in f1_stats.items():
+        for t,s in sorted(f1_stats.items(), key= lambda x:x[0]):
             if type(s) is dict:
-                print "{}:{}: P: {s[precision]:2.4f}, R: {s[recall]:2.4f}, F1: {s[f1]:2.4f}".format(
-                    name, t, s=s)
+                print "{} :{}: P: {s[precision]:2.4f} R: {s[recall]:2.4f} F1: {s[f1]:2.4f}\
+ tp:{s[tp]} fp:{s[fp]} fn:{s[fn]} support:{s[support]}".format(
+                        name, t, s=s)
 
     if not eval_only:
         # training
@@ -344,6 +348,7 @@ def parse_args():
                         type=int)
     parser.add_argument('--bidirectional', action='store_true', default=False)
     parser.add_argument('--use_mlp', action='store_true', default=False)
+    parser.add_argument('--use_hdropout', action='store_true', default=False)
     parser.add_argument('--weight_decay',
                         default=.0001,
                         type=float)
@@ -358,7 +363,7 @@ def parse_args():
     parser.add_argument('--model_f', type=str, default='',
                         help='Overrides name of the model output files')
     parser.add_argument('--map_func_name', type=str, default='E_BIO_map',
-                        choices=['NoVal_BIO_map', 'E_BIO_map'])
+                        choices=['NoVal_BIO_map', 'E_BIO_map', 'E_typed_BIO_map'])
     return parser.parse_args()
 
 def name_tagger(args):

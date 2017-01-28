@@ -67,9 +67,9 @@ def mention_boundary_stats(true_ys, pred_ys, **kwds):
     # for t in typeset:
     #     print t, len({m for seq_mentions in all_true_mentions+all_pred_mentions
     #                     for m in seq_mentions if m[2] == t})
-    stats = {'tp':0,
-             'fp':0,
-             'fn':0}
+    stats = {'tp':0, 'fp':0,'fn':0}
+    stats['entity'] = {'tp':0, 'fp':0, 'fn':0}
+    stats['event-anchor'] = {'tp':0, 'fp':0, 'fn':0}
     for t in typeset:
         stats[t] = {'tp':0,
                     'fp':0,
@@ -84,15 +84,26 @@ def mention_boundary_stats(true_ys, pred_ys, **kwds):
                 stats[t]['tp'] += s[t]['tp']
                 stats[t]['fp'] += s[t]['fp']
                 stats[t]['fn'] += s[t]['fn']
-
+                if 'entity' in t:
+                    stats['entity']['tp'] += s[t]['tp']
+                    stats['entity']['fp'] += s[t]['fp']
+                    stats['entity']['fn'] += s[t]['fn']
+                elif 'event-anchor' in t:
+                    stats['event-anchor']['tp'] += s[t]['tp']
+                    stats['event-anchor']['fp'] += s[t]['fp']
+                    stats['event-anchor']['fn'] += s[t]['fn']
+                else:
+                    print "invalid m type found {}".format(t)
     stats['precision'] = stats['tp'] / float(stats['tp'] + stats['fp'] +1e-15)
     stats['recall'] = stats['tp'] / float(stats['tp'] + stats['fn'] +1e-15)
     stats['f1'] = 2*stats['precision']*stats['recall']/(stats['precision']+stats['recall']+1e-15)
-    for t in typeset:
+    stats['support'] = stats['tp'] + stats['fp'] + stats['fn']
+    for t in typeset | set(['entity', 'event-anchor']):
         stats[t]['precision'] = stats[t]['tp'] / float(stats[t]['tp'] + stats[t]['fp'] +1e-15)
         stats[t]['recall'] = stats[t]['tp'] / float(stats[t]['tp'] + stats[t]['fn'] +1e-15)
         stats[t]['f1'] = (2*stats[t]['precision']*stats[t]['recall']/
                          (stats[t]['precision']+stats[t]['recall']+1e-15))
+        stats[t]['support'] = stats[t]['tp'] + stats[t]['fp'] + stats[t]['fn']
     return stats
 
 def mention_stats(m_preds, m_trues):
