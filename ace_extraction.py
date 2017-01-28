@@ -121,6 +121,7 @@ def train(dataset, tagger,
             all_ms.extend(m_list)
             all_rs.extend(r_list)
             b_preds, m_preds, r_preds, m_spans, r_spans = extractor.predict(sequences2arrays(x_list))
+            b_preds = [ pred.data for pred in ch.functions.transpose_sequence(b_preds) ]
             all_bpreds.extend(b_preds)
             mp_list = [ [ (s[0],s[1], p) for p,s in zip(preds, spans)]
                         for preds,spans in zip(m_preds, m_spans)]

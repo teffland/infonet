@@ -389,11 +389,11 @@ def get_ace_extraction_data(count=0, map_func_name='NoVal_BIO_map', **kwds):
     #     for t in s:
     #         print '\t  {}'.format(t)
     #
-    print "Mention subtypes to relations:"
-    for m, s in msubtype2rtype.items():
-        print '\t{}:'.format(m)
-        for t, v in s.items():
-            print '\t  {}:: {}'.format(t, v)
+    # print "Mention subtypes to relations:"
+    # for m, s in msubtype2rtype.items():
+    #     print '\t{}:'.format(m)
+    #     for t, v in s.items():
+    #         print '\t  {}:: {}'.format(t, v)
 
     # convert to indices in vocab
     ix_train = convert_sequences(x_train, token_vocab.idx)
