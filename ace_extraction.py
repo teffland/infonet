@@ -39,7 +39,7 @@ def train(dataset, tagger,
           STATS, model_name,
           batch_size, n_epoch, wait,
           lstm_size, use_mlp, bidirectional, shortcut_embeds,
-          learning_rate, dropout,
+          learning_rate, dropout, backprop,
           eval_only=False,
           max_dist=500,
           **kwds):
