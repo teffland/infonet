@@ -117,10 +117,11 @@ def train(dataset, tagger,
         for batch in batch_iter:
             x_list, b_list, m_list, r_list = zip(*batch)
             all_xs.extend(x_list)
+            all_bs.extend(b_list)
             all_ms.extend(m_list)
             all_rs.extend(r_list)
             b_preds, m_preds, r_preds, m_spans, r_spans = extractor.predict(sequences2arrays(x_list))
-            all_bs.extend(b_preds)
+            all_bpreds.extend(b_preds)
             mp_list = [ [ (s[0],s[1], p) for p,s in zip(preds, spans)]
                         for preds,spans in zip(m_preds, m_spans)]
             all_mpreds.extend(mp_list)
@@ -145,7 +146,8 @@ def train(dataset, tagger,
         # m_f1_stats = mention_stats(all_mpreds, all_ms)
         # r_f1_stats = relation_stats(all_rpreds, all_rs)
         f1_stats = mention_relation_stats(all_ms, all_mpreds, all_rs, all_rpreds)
-        f1_stats.update(mention_boundary_stats(all_bs, all_bpreds, **tag_map))
+        f1_stats.update({'tag-'+k:v for k,v in
+                         mention_boundary_stats(all_bs, all_bpreds, **tag_map)})
         if keep_raw:
             # m_f1_stats['xs'] = all_xs
             # m_f1_stats['m_preds'] = all_mpreds
