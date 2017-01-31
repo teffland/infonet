@@ -39,7 +39,7 @@ def train(dataset, tagger,
           STATS, model_name,
           batch_size, n_epoch, wait,
           lstm_size, use_mlp, bidirectional, shortcut_embeds,
-          learning_rate, dropout, backprop,
+          learning_rate, dropout, backprop, downsample,
           eval_only=False,
           max_dist=500,
           **kwds):
@@ -91,6 +91,7 @@ def train(dataset, tagger,
     extractor = Extractor(tagger,
                           mention_vocab.v, relation_vocab.v,
                           null_idx=relation_vocab.idx(u'--NULL--'),
+                          coref_idx=relation_vocab.idx(u'coreference:--SameAs--'),
                           lstm_size=lstm_size,
                           use_mlp=use_mlp,
                           bidirectional=bidirectional,
@@ -150,12 +151,6 @@ def train(dataset, tagger,
         f1_stats.update({'boundary-'+k:v for k,v in
                          mention_boundary_stats(all_bs, all_bpreds, **tag_map).items()})
         if keep_raw:
-            # m_f1_stats['xs'] = all_xs
-            # m_f1_stats['m_preds'] = all_mpreds
-            # m_f1_stats['m_trues'] = all_ms
-            # r_f1_stats['xs'] = all_xs
-            # r_f1_stats['r_preds'] = all_rpreds
-            # r_f1_stats['r_trues'] = all_rs
             f1_stats['xs'] = all_xs
             f1_stats['b_preds'] = all_bpreds
             f1_stats['b_trues'] = all_bs
@@ -163,7 +158,7 @@ def train(dataset, tagger,
             f1_stats['m_trues'] = all_ms
             f1_stats['r_preds'] = all_rpreds
             f1_stats['r_trues'] = all_rs
-        return f1_stats #m_f1_stats, r_f1_stats
+        return f1_stats
 
     def reset_stats(STATS):
         """ Reset the monitor statistics of STATS """
@@ -207,7 +202,9 @@ def train(dataset, tagger,
             # run model
             start = time.time()
             loss = extractor_loss(x_list, b_list, m_list, r_list,
-                                  backprop_to_tagger=backprop)
+                                  backprop_to_tagger=backprop,
+                                  downsample=downsample,
+                                  b_loss=False)
             STATS['forward_times'].append(time.time()-start)
             loss_val = np.asscalar(loss.data)
             print_batch_loss(loss_val,
@@ -310,6 +307,7 @@ def parse_args():
     parser.add_argument('--use_mlp', action='store_true', default=False)
     parser.add_argument('--bidirectional', action='store_true', default=False)
     parser.add_argument('--shortcut_embeds', action='store_true', default=False)
+    parser.add_argument('--downsample', action='store_true', default=False)
     parser.add_argument('--eval_only', action='store_true', default=False)
     parser.add_argument('--rseed', type=int, default=42,
                         help='Sets the random seed')

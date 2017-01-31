@@ -14,7 +14,7 @@ class Extractor(ch.Chain):
                  tagger,
                  n_mention_class,
                  n_relation_class,
-                 null_idx,
+                 null_idx, coref_idx,
                  lstm_size=50,
                  bidirectional=False,
                  n_layers=1,
@@ -67,6 +67,7 @@ class Extractor(ch.Chain):
         self.tag2mtype = tag2mtype
         self.max_rel_dist = max_rel_dist
         self.null_idx = null_idx
+        self.coref_idx = coref_idx
 
         # convert the typemaps to indicator array masks
         # mention type -> subtype uses the string label, so keep it as a dict
@@ -356,6 +357,7 @@ class ExtractorLoss(ch.Chain):
 
     def __call__(self, x_list, gold_b_list, gold_m_list, gold_r_list,
                  b_loss=True, m_loss=True, r_loss=True,
+                 downsample=True, boundary_reweighting=False,
                  **kwds):
         # extract the graph
         (b_features, b_preds,
@@ -403,7 +405,8 @@ class ExtractorLoss(ch.Chain):
             # print type(m_logits), len(m_logits)
             doc_mention_loss = batch_weighted_softmax_cross_entropy(m_logits, labels,
                                                                     instance_weight=weights)
-            doc_mention_loss *= len(weights) / (np.sum(weights) + 1e-15)
+            if boundary_reweighting:
+                doc_mention_loss *= len(weights) / (np.sum(weights) + 1e-15)
             mention_loss += doc_mention_loss
 
             # do the same for relations
@@ -424,9 +427,42 @@ class ExtractorLoss(ch.Chain):
             # print "{} true, {} pred, {} correct relation spans".format(
             #   len(gold_r), len(r_spans), np.sum(weights))
             labels = np.array(labels, dtype=np.int32)
+            # we downsample coref and null entries to the average number of examples
+            # for all of the other correct labels
+            # that way learning isn't overtaken
+            # by 90% NULL and 5% coref and 5% everything else
+            if downsample:
+                i_n, i_c = self.extractor.null_idx, self.extractor.coref_idx
+                # get max count of non coref/null examples
+                good_labels = labels[weights==1.]
+                # print "Label counts before down sample:"
+                # print '\t', np.vstack(np.unique(good_labels, return_counts=True))
+                unique, counts = np.unique(good_labels[np.all([good_labels!=i_n,
+                                                               good_labels!=i_c], axis=0)],
+                                           return_counts=True)
+
+                if counts.size == 0: break # handle degenerate predictions
+                max_count = np.max(counts)
+                # now get all possible down-sample-able indices of NULLs
+                # and set all but max_count of them to have 0 weight
+                possible_labels = np.argwhere(np.all([weights==1.,labels==i_n],axis=0)).reshape(-1)
+                if possible_labels.size == 0: break # handle degenerate predictions
+                down_idxs = npr.choice(possible_labels, size=len(possible_labels)-max_count, replace=False)
+                weights[down_idxs] = 0.
+                # do the same for coref
+                possible_labels = np.argwhere(np.all([weights==1.,labels==i_c],axis=0)).reshape(-1)
+                if possible_labels.size == 0: break # handle degenerate predictions
+                down_idxs = npr.choice(possible_labels, size=len(possible_labels)-max_count, replace=False)
+                weights[down_idxs] = 0.
+
+                good_labels = labels[weights==1.]
+                # print "Label counts after down sample:"
+                # print '\t', np.vstack(np.unique(good_labels, return_counts=True))
+
             doc_relation_loss = batch_weighted_softmax_cross_entropy(r_logits, labels,
                                                                  instance_weight=weights)
-            doc_relation_loss *= len(weights) / (np.sum(weights) + 1e-15)
+            if boundary_reweighting:
+                doc_relation_loss *= len(weights) / (np.sum(weights) + 1e-15)
             relation_loss += doc_relation_loss
 
         mention_loss /= batch_size
