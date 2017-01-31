@@ -204,7 +204,7 @@ def train(dataset, tagger,
             loss = extractor_loss(x_list, b_list, m_list, r_list,
                                   backprop_to_tagger=backprop,
                                   downsample=downsample,
-                                  b_loss=False)
+                                  b_loss=True)
             STATS['forward_times'].append(time.time()-start)
             loss_val = np.asscalar(loss.data)
             print_batch_loss(loss_val,
