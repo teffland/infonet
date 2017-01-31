@@ -367,8 +367,9 @@ class ExtractorLoss(ch.Chain):
         # print zip([len(m) for m in men_logits], [len(r) for r in rel_logits])
         # compute loss per sequence
         # print b_features
-        boundary_loss = self.tagger_loss(x_list, gold_b_list,
-                                         features=b_features)
+        if b_loss:
+            boundary_loss = self.tagger_loss(x_list, gold_b_list,
+                                             features=b_features)
         mention_loss = relation_loss = 0
         batch_size = float(len(men_logits))
         zipped = zip(men_logits, rel_logits,
