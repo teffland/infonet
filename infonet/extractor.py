@@ -459,7 +459,7 @@ class ExtractorLoss(ch.Chain):
                 good_labels = labels[weights==1.]
                 # print "Label counts after down sample:"
                 # print '\t', np.vstack(np.unique(good_labels, return_counts=True))
-
+                print len(weights==1.), len(weights)
             doc_relation_loss = batch_weighted_softmax_cross_entropy(r_logits, labels,
                                                                  instance_weight=weights)
             if boundary_reweighting:
