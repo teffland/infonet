@@ -64,6 +64,10 @@ def train(dataset, tagger,
     msubtype2rtype['right'] = { mention_vocab.idx(msubtype):
                                 [ relation_vocab.idx(r) for r in s ]
                                 for msubtype, s in msubtype2rtype['right'].items()}
+
+    x_train = dataset['x_train']
+    x_dev = dataset['x_dev']
+    x_test = dataset['x_test']
     ix_train = dataset['ix_train']
     ix_dev = dataset['ix_dev']
     ix_test = dataset['ix_test']
@@ -80,11 +84,11 @@ def train(dataset, tagger,
     # print tag_map
 
     # data
-    train_iter = SequenceIterator(zip(ix_train, ib_train, im_train, ir_train),
+    train_iter = SequenceIterator(zip(x_train, ix_train, ib_train, im_train, ir_train),
         batch_size, repeat=True)
-    dev_iter = SequenceIterator(zip(ix_dev, ib_dev, im_dev, ir_dev),
+    dev_iter = SequenceIterator(zip(x_dev, ix_dev, ib_dev, im_dev, ir_dev),
         batch_size, repeat=True)
-    test_iter = SequenceIterator(zip(ix_test, ib_test, im_test, ir_test),
+    test_iter = SequenceIterator(zip(x_test, ix_test, ib_test, im_test, ir_test),
         batch_size, repeat=True)
 
     # model
@@ -111,12 +115,13 @@ def train(dataset, tagger,
                  mention_vocab=mention_vocab,
                  relation_vocab=relation_vocab,
                  keep_raw=False):
-        all_xs = []
+        all_truexs, all_xs = [], []
         all_bs, all_bpreds = [], []
         all_ms, all_mpreds = [], []
         all_rs, all_rpreds = [], []
         for batch in batch_iter:
-            x_list, b_list, m_list, r_list = zip(*batch)
+            tx_list, x_list, b_list, m_list, r_list = zip(*batch)
+            all_truexs.extend(tx_list)
             all_xs.extend(x_list)
             all_bs.extend(b_list)
             all_ms.extend(m_list)
@@ -151,6 +156,7 @@ def train(dataset, tagger,
         f1_stats.update({'boundary-'+k:v for k,v in
                          mention_boundary_stats(all_bs, all_bpreds, **tag_map).items()})
         if keep_raw:
+            f1_stats['true_xs'] = all_truexs
             f1_stats['xs'] = all_xs
             f1_stats['b_preds'] = all_bpreds
             f1_stats['b_trues'] = all_bs
@@ -192,7 +198,7 @@ def train(dataset, tagger,
         for batch in train_iter:
             STATS['epoch'] = train_iter.epoch
             # prepare data and model
-            x_list, b_list, m_list, r_list = zip(*batch)
+            _, x_list, b_list, m_list, r_list = zip(*batch)
             x_list = sequences2arrays(x_list)
             b_list = sequences2arrays(b_list)
             extractor.reset_state()

@@ -442,30 +442,29 @@ class ExtractorLoss(ch.Chain):
                                                                good_labels!=i_c], axis=0)],
                                            return_counts=True)
 
-                if counts.size == 0: break # handle degenerate predictions
-                max_count = np.max(counts)
+                max_count = np.max(counts) if counts.size > 0 else 1
                 # now get all possible down-sample-able indices of NULLs
                 # and set all but max_count of them to have 0 weight
                 possible_labels = np.argwhere(np.all([weights==1.,labels==i_n],axis=0)).reshape(-1)
-                if possible_labels.size == 0: break # handle degenerate predictions
-                down_idxs = npr.choice(possible_labels, size=len(possible_labels)-max_count, replace=False)
-                weights[down_idxs] = 0.
+                if possible_labels.size > 0:
+                    down_idxs = npr.choice(possible_labels, size=len(possible_labels)-max_count, replace=False)
+                    weights[down_idxs] = 0.
                 # do the same for coref
                 possible_labels = np.argwhere(np.all([weights==1.,labels==i_c],axis=0)).reshape(-1)
-                if possible_labels.size == 0: break # handle degenerate predictions
-                down_idxs = npr.choice(possible_labels, size=len(possible_labels)-max_count, replace=False)
-                weights[down_idxs] = 0.
+                if possible_labels.size > 0:
+                    down_idxs = npr.choice(possible_labels, size=len(possible_labels)-max_count, replace=False)
+                    weights[down_idxs] = 0.
 
-                good_labels = labels[weights==1.]
+                # good_labels = labels[weights==1.]
                 # print "Label counts after down sample:"
                 # print '\t', np.vstack(np.unique(good_labels, return_counts=True))
-                print np.sum(weights), len(weights)
+                # print np.sum(weights), len(weights)
             doc_relation_loss = batch_weighted_softmax_cross_entropy(r_logits, labels,
                                                                  instance_weight=weights)
             if boundary_reweighting:
                 doc_relation_loss *= len(weights) / (np.sum(weights) + 1e-15)
             relation_loss += doc_relation_loss
-
+        print
         mention_loss /= batch_size
         relation_loss /= batch_size
         # print "Extract Loss: B:{0:2.4f}, M:{1:2.4f}, R:{2:2.4f}".format(
