@@ -39,7 +39,7 @@ def train(dataset, tagger,
           STATS, model_name,
           batch_size, n_epoch, wait,
           lstm_size, use_mlp, bidirectional, shortcut_embeds,
-          learning_rate, dropout, backprop, downsample,
+          learning_rate, dropout, backprop, downsample, reweight,
           eval_only=False,
           max_dist=500,
           **kwds):
@@ -210,6 +210,7 @@ def train(dataset, tagger,
             loss = extractor_loss(x_list, b_list, m_list, r_list,
                                   backprop_to_tagger=backprop,
                                   downsample=downsample,
+                                  reweight=reweight,
                                   b_loss=True)
             STATS['forward_times'].append(time.time()-start)
             loss_val = np.asscalar(loss.data)
@@ -314,6 +315,7 @@ def parse_args():
     parser.add_argument('--bidirectional', action='store_true', default=False)
     parser.add_argument('--shortcut_embeds', action='store_true', default=False)
     parser.add_argument('--downsample', action='store_true', default=False)
+    parser.add_argument('--reweight', action='store_true', default=False)
     parser.add_argument('--eval_only', action='store_true', default=False)
     parser.add_argument('--rseed', type=int, default=42,
                         help='Sets the random seed')

@@ -51,6 +51,8 @@ class Extractor(ch.Chain):
             f_m=L.Linear(feature_size+1, n_mention_class),
             f_r=L.Linear(2*feature_size+3, n_relation_class)
         )
+        self.n_mention_class = n_mention_class
+        self.n_relation_class = n_relation_class
         self.lstms = lstms
         for i, lstm in enumerate(self.lstms):
             self.add_link('lstm_{}'.format(i), lstm)
@@ -357,8 +359,9 @@ class ExtractorLoss(ch.Chain):
 
     def __call__(self, x_list, gold_b_list, gold_m_list, gold_r_list,
                  b_loss=True, m_loss=True, r_loss=True,
-                 downsample=True, boundary_reweighting=False,
+                 downsample=False, reweight=False, boundary_reweighting=False,
                  **kwds):
+        assert not (downsample and reweight), "cannot downsample and reweight"
         # extract the graph
         (b_features, b_preds,
         men_logits, rel_logits,
@@ -454,17 +457,31 @@ class ExtractorLoss(ch.Chain):
                 if possible_labels.size > 0:
                     down_idxs = npr.choice(possible_labels, size=len(possible_labels)-max_count, replace=False)
                     weights[down_idxs] = 0.
-
+                doc_relation_loss = batch_weighted_softmax_cross_entropy(r_logits, labels,
+                                                                     instance_weight=weights)
+            elif reweight:
+                unique, counts = np.unique(labels[weights==1.], return_counts=True)
+                # print np.vstack([unique, counts])
+                counts = np.sum(counts)/counts
+                # print np.vstack([unique, counts])
+                class_weights = np.ones(self.extractor.n_relation_class, dtype=np.float32)
+                class_weights[unique] = counts
+                # print class_weights
+                # class_weights =
                 # good_labels = labels[weights==1.]
                 # print "Label counts after down sample:"
                 # print '\t', np.vstack(np.unique(good_labels, return_counts=True))
                 # print np.sum(weights), len(weights)
-            doc_relation_loss = batch_weighted_softmax_cross_entropy(r_logits, labels,
-                                                                 instance_weight=weights)
+                doc_relation_loss = batch_weighted_softmax_cross_entropy(r_logits, labels,
+                                                                     class_weight=class_weights,
+                                                                     instance_weight=weights)
+            else:
+                doc_relation_loss = batch_weighted_softmax_cross_entropy(r_logits, labels,
+                                                                     instance_weight=weights)
+
             if boundary_reweighting:
                 doc_relation_loss *= len(weights) / (np.sum(weights) + 1e-15)
             relation_loss += doc_relation_loss
-        print
         mention_loss /= batch_size
         relation_loss /= batch_size
         # print "Extract Loss: B:{0:2.4f}, M:{1:2.4f}, R:{2:2.4f}".format(
