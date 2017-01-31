@@ -4,7 +4,7 @@ import chainer as ch
 import chainer.functions as F
 import chainer.links as L
 
-from tagger import extract_all_mentions
+from tagger import extract_all_mentions, TaggerLoss
 from special_functions import batch_weighted_softmax_cross_entropy
 from gru import GRU, BidirectionalGRU
 from masked_softmax import masked_softmax
@@ -204,14 +204,17 @@ class Extractor(ch.Chain):
                                                             return_features=True)
 
         if not backprop_to_tagger:
-            for feature in tagger_features:
-                feature.unchain_backward()
+            # allow backprop through tagger_features but not features
+            features = [ F.identity(f) for f in tagger_features ]
+            for f in features:
+                f.unchain_backward()
+        else:
+            features = tagger_features
 
         if self.shortcut_embeds:
             embeds = self.tagger.embeds
-            tagger_features = [ F.hstack([f,e])
-                                for f,e in zip(tagger_features, embeds)]
-
+            features = [ F.hstack([f,e])
+                         for f,e in zip(features, embeds)]
 
         # do another layer of features on the tagger layer
         if self.bidirectional:
@@ -225,11 +228,11 @@ class Extractor(ch.Chain):
                 b_lstms = b_lstms[::-1]
                 return [ F.hstack([f,b]) for f,b in zip(f_lstms, b_lstms)]
             # run the layers of bilstms
-            lstms = [ drop(h, self.dropout, train) for h in bilstm(tagger_features, self.lstms[0]) ]
+            lstms = [ drop(h, self.dropout, train) for h in bilstm(features, self.lstms[0]) ]
             for lstm in self.lstms[1:]:
                 lstms = [ drop(h, self.dropout, train) for h in bilstm(lstms, lstm) ]
         else:
-            lstms = [ drop(self.lstms[0](x), self.dropout, train) for x in tagger_features ]
+            lstms = [ drop(self.lstms[0](x), self.dropout, train) for x in features ]
             for lstm in self.lstms[1:]:
                 lstms = [ drop(lstm(h), self.dropout, train) for h in lstms ]
 
@@ -289,7 +292,7 @@ class Extractor(ch.Chain):
 
         # convert mention spans to lists
         m_spans = [tuple([tuple(mspan) for mspan in mspans.tolist() ]) for mspans in m_spans]
-        return (tagger_preds,
+        return (tagger_features, tagger_preds,
                 m_logits, r_logits,
                 mention_masks, rel_masks,
                 m_spans, r_spans, null_r_spans)
@@ -298,7 +301,7 @@ class Extractor(ch.Chain):
         if reset_state:
             self.reset_state()
 
-        (b_preds,
+        (b_features, b_preds,
         m_logits, r_logits,
         m_masks, r_masks,
         m_spans, r_spans, null_r_spans) = self(x_list)
@@ -347,17 +350,23 @@ class Extractor(ch.Chain):
 class ExtractorLoss(ch.Chain):
     def __init__(self, extractor):
         super(ExtractorLoss, self).__init__(
-            extractor=extractor
+            extractor=extractor,
+            tagger_loss=TaggerLoss(extractor.tagger.copy())
         )
 
-    def __call__(self, x_list, gold_m_list, gold_r_list, **kwds):
+    def __call__(self, x_list, gold_b_list, gold_m_list, gold_r_list,
+                 b_loss=True, m_loss=True, r_loss=True,
+                 **kwds):
         # extract the graph
-        (b_preds,
+        (b_features, b_preds,
         men_logits, rel_logits,
         men_masks, rel_masks,
         men_spans, rel_spans, null_rspans) = self.extractor(x_list, **kwds)
         # print zip([len(m) for m in men_logits], [len(r) for r in rel_logits])
         # compute loss per sequence
+        # print b_features
+        boundary_loss = self.tagger_loss(x_list, gold_b_list,
+                                         features=b_features)
         mention_loss = relation_loss = 0
         batch_size = float(len(men_logits))
         zipped = zip(men_logits, rel_logits,
@@ -422,7 +431,19 @@ class ExtractorLoss(ch.Chain):
 
         mention_loss /= batch_size
         relation_loss /= batch_size
-        return (mention_loss + relation_loss)
+        print "Extract Loss: B:{0:2.4f}, M:{1:2.4f}, R:{2:2.4f}".format(
+            np.asscalar(boundary_loss.data),
+            np.asscalar(mention_loss.data),
+            np.asscalar(relation_loss.data))
+
+        loss = 0
+        if b_loss:
+            loss += boundary_loss
+        if m_loss:
+            loss += mention_loss
+        if r_loss:
+            loss += relation_loss
+        return loss
 
     def report(self):
         return self.extractor.report()

@@ -147,7 +147,7 @@ def train(dataset, tagger,
         # m_f1_stats = mention_stats(all_mpreds, all_ms)
         # r_f1_stats = relation_stats(all_rpreds, all_rs)
         f1_stats = mention_relation_stats(all_ms, all_mpreds, all_rs, all_rpreds)
-        f1_stats.update({'tag-'+k:v for k,v in
+        f1_stats.update({'boundary-'+k:v for k,v in
                          mention_boundary_stats(all_bs, all_bpreds, **tag_map).items()})
         if keep_raw:
             # m_f1_stats['xs'] = all_xs
@@ -199,13 +199,14 @@ def train(dataset, tagger,
             # prepare data and model
             x_list, b_list, m_list, r_list = zip(*batch)
             x_list = sequences2arrays(x_list)
+            b_list = sequences2arrays(b_list)
             extractor.reset_state()
             extractor_loss.cleargrads()
             STATS['seq_lengths'].append(len(x_list))
 
             # run model
             start = time.time()
-            loss = extractor_loss(x_list, m_list, r_list,
+            loss = extractor_loss(x_list, b_list, m_list, r_list,
                                   backprop_to_tagger=backprop)
             STATS['forward_times'].append(time.time()-start)
             loss_val = np.asscalar(loss.data)

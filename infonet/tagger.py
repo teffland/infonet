@@ -111,14 +111,14 @@ class Tagger(ch.Chain):
         else:
             return lstms
 
-    def predict(self, x_list, reset=True, return_features=False, **kwds):
+    def predict(self, x_list, reset=True, return_features=False, train=False, **kwds):
         if reset:
             self.reset_state()
         if self.crf_type:
-            features = self(x_list, train=False, return_logits=False )
+            features = self(x_list, train=train, return_logits=False)
             _, preds = self.crf.argmax(features)
         else:
-            features = self(x_list, train=False, return_logits=True)
+            features = self(x_list, train=train, return_logits=True)
             preds = [ ch.functions.argmax(logit, axis=1) for logit in features ]
         if return_features:
             return preds, features
@@ -143,17 +143,20 @@ class TaggerLoss(ch.Chain):
         )
         self.loss_func = loss_func
 
-    def __call__(self, x_list, y_list):
+    def __call__(self, x_list, b_list, features=None):
+        # inputting features skips evaluation of the network
         if self.tagger.crf_type:
-            features = self.tagger(x_list)
-            return self.tagger.crf(features, y_list)
+            if features is None:
+                features = self.tagger(x_list)
+            return self.tagger.crf(features, b_list)
 
         elif self.loss_func == ch.functions.softmax_cross_entropy:
             loss = 0
-            logits = self.tagger(x_list, return_logits=True)
-            for logit, y in zip(logits, y_list):
-                loss += self.loss_func(logit, y)
-            return loss
+            if features is None:
+                features = self.tagger(x_list, return_logits=True)
+            for logit, y in zip(features, b_list):
+                loss += self.loss_func(logit, b)
+            return loss / float(len(b_list))
 
     def report(self):
         return self.tagger.report()

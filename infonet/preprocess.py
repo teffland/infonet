@@ -176,7 +176,7 @@ def compute_tag_map(boundary_vocab):
                              if t.startswith('O')]),
         'tag2mtype':{t:'-'.join(t.split('-')[1:])
                     if len(t.split('-')) > 1
-                    else 'ALL'
+                    else '<UNK>'
                     for t in boundary_vocab.vocabset
                     }
     }
@@ -214,6 +214,9 @@ def compute_typemaps(docs):
                 msubtype2rtype['right'][right_msubtype] |= {rtype}
             else:
                 msubtype2rtype['right'][right_msubtype] = {rtype}
+
+    # add in ALL for misclassification at the beginning
+    mtype2msubtype['<UNK>'] = mtype2msubtype.values()[0]
     return mtype2msubtype, msubtype2rtype
 
 def compute_mentions(doc, fine_grained=False, omit_timex=True):
