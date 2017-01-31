@@ -468,10 +468,10 @@ class ExtractorLoss(ch.Chain):
 
         mention_loss /= batch_size
         relation_loss /= batch_size
-        print "Extract Loss: B:{0:2.4f}, M:{1:2.4f}, R:{2:2.4f}".format(
-            np.asscalar(boundary_loss.data),
-            np.asscalar(mention_loss.data),
-            np.asscalar(relation_loss.data))
+        # print "Extract Loss: B:{0:2.4f}, M:{1:2.4f}, R:{2:2.4f}".format(
+        #     np.asscalar(boundary_loss.data),
+        #     np.asscalar(mention_loss.data),
+        #     np.asscalar(relation_loss.data))
 
         loss = 0
         if b_loss:
