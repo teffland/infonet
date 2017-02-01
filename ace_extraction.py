@@ -207,11 +207,13 @@ def train(dataset, tagger,
 
             # run model
             start = time.time()
+            r_loss = True if train_iter.epoch > 30 else False
             loss = extractor_loss(x_list, b_list, m_list, r_list,
                                   backprop_to_tagger=backprop,
                                   downsample=downsample,
                                   reweight=reweight,
-                                  b_loss=True)
+                                  b_loss=True,
+                                  r_loss=r_loss)
             STATS['forward_times'].append(time.time()-start)
             loss_val = np.asscalar(loss.data)
             print_batch_loss(loss_val,
