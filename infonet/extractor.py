@@ -102,6 +102,13 @@ class Extractor(ch.Chain):
         for lstm in self.lstms:
             lstm.reset_state()
 
+    def _mention_feature_agg(self, features, span):
+        mention = F.sum(features[span[0]:span[1]], axis=0)
+        mention /= F.broadcast_to(ch.Variable(np.array(span[1]-span[0],
+                                                     dtype=np.float32)),
+                                         mention.shape)
+        return mention
+
     def _extract_graph(self, tagger_preds, features):
         """ Subroutine responsible for extracting the graph and graph features
         from the tagger predictions using `extract_all_mentions`.
@@ -152,10 +159,7 @@ class Extractor(ch.Chain):
             # print '{} mentions'.format(len(boundaries))
             for i, b in enumerate(boundaries):
                 # mention feature is average of its span features
-                mention = F.sum(features[b[0]:b[1]], axis=0)
-                mention /= F.broadcast_to(ch.Variable(np.array(b[1]-b[0],
-                                                             dtype=np.float32)),
-                                                 mention.shape)
+                mention = self._mention_feature_agg(features, b)
                 mentions.append(mention)
                 mention_spans.append((b[0], b[1]))
                 mention_masks.append(self.mtype2msubtype[b[2]])
