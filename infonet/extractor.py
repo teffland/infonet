@@ -235,7 +235,11 @@ class Extractor(ch.Chain):
             for lstm in self.lstms[1:]:
                 lstms = [ drop(h, self.dropout, train) for h in bilstm(lstms, lstm) ]
         else:
-            lstms = [ drop(self.lstms[0](x), self.dropout, train) for x in features ]
+            lstms = []
+            for i, x in enumerate(features):
+                print i,
+                lstms.append(drop(self.lstms[0](x), self.dropout, train))
+            # lstms = [ drop(self.lstms[0](x), self.dropout, train) for x in features ]
             for lstm in self.lstms[1:]:
                 lstms = [ drop(lstm(h), self.dropout, train) for h in lstms ]
 

@@ -89,7 +89,12 @@ class Tagger(ch.Chain):
                     lstms = [ drop(h, self.dropout, train) for h in bilstm(lstms, lstm) ]
         else:
             if self.use_hdropout:
-                lstms = [ self.lstms[0](x, train=train) for x in self.embeds ]
+                # lstms = []
+                # for i, x in enumerate(self.embeds):
+                #     print i
+                #     lstms.append(drop(self.lstms[0](x), self.dropout, train))
+                # print
+                lstms = [ drop(self.lstms[0](x), self.dropout, train) for x in self.embeds ]
                 for lstm in self.lstms[1:]:
                     lstms = [ lstm(h, train=train) for h in lstms ]
             else:
@@ -154,7 +159,7 @@ class TaggerLoss(ch.Chain):
             loss = 0
             if features is None:
                 features = self.tagger(x_list, return_logits=True)
-            for logit, y in zip(features, b_list):
+            for logit, b in zip(features, b_list):
                 loss += self.loss_func(logit, b)
             return loss / float(len(b_list))
 

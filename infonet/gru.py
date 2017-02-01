@@ -80,6 +80,7 @@ class GRU(ch.Link):
         self.h = ch.Variable(array)
         if self.dropout:
             self.h, self.h_drop_mask = dropout(self.h, self.dropout, return_mask=True)
+            self.h_drop_mask.data[self.h_drop_mask.data != 0.] = 1.
 
     def reset_state(self):
         self.h = None
@@ -117,7 +118,8 @@ class GRU(ch.Link):
         # NOTE: usually h is calculated without squashing, but this coupled with the repeated dropout
         # was causing steady explosion of h values due to repeated application of dropout scale factors
         if self.h_drop_mask is not None:
-            h = F.tanh((1.-z)*h + z*hbar)
+            # h = F.tanh((1.-z)*h + z*hbar)
+            h = (1.-z)*h + z*hbar
         else:
             h = (1.-z)*h + z*hbar
 
