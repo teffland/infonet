@@ -71,7 +71,8 @@ def train(dataset, STATS, model_name,
 
     print tag_map
     print len(tag_map['tag2mtype']), ' output labels'
-    train_iter = SequenceIterator(zip(ix_train, ib_train, im_train), batch_size, repeat=True)
+    # train_iter = SequenceIterator(zip(ix_train, ib_train, im_train), batch_size, repeat=True)
+    train_iter = SequenceIterator(zip(ix_train+ix_dev, ib_train+ib_dev, im_train+im_dev), batch_size, repeat=True)
     dev_iter = SequenceIterator(zip(ix_dev, ib_dev, im_dev), batch_size, repeat=True)
     test_iter = SequenceIterator(zip(ix_test, ib_test, im_test), batch_size, repeat=True)
 
@@ -368,7 +369,9 @@ def parse_args():
     parser.add_argument('--model_f', type=str, default='',
                         help='Overrides name of the model output files')
     parser.add_argument('--map_func_name', type=str, default='E_BIO_map',
-                        choices=['NoVal_BIO_map', 'E_BIO_map', 'E_typed_BIO_map'])
+                        choices=['NoVal_BIO_map',
+                                 'E_BIO_map', 'E_typed_BIO_map',
+                                 'Entity_BIO_map', 'Entity_typed_BIO_map'])
     return parser.parse_args()
 
 def name_tagger(args):

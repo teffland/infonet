@@ -57,6 +57,10 @@ class BipartiteCRF(ch.Link):
         q_m = ch.Variable(np.ones((M, self.n_mention_class))/float(self.n_mention_class))
         q_r = ch.Variable(np.ones((M, self.n_relation_class))/float(self.n_relation_class))
 
+        # do approximate inference
+        q_m, q_r = self.mean_field(q_m, q_r,
+                                   log_phi_m, log_phi_r, log_phi_mr,
+                                   mention_nbrs, relation_nbrs)
 
     def mean_field(self, q_m, q_r,
                    log_phi_m, log_phi_r, log_phi_mr,
@@ -98,3 +102,18 @@ class BipartiteCRF(ch.Link):
             q_rt_prev = q_rt
             t += 1
         return q_mt, q_rt
+
+
+class ApproxBipartiteCRF(F.Function):
+    """ This function computes the probability of a labeled bipartite graph
+    under an approximation.
+
+    Its derivative is the approximation to the negative conditional log-likelihood
+    of the bipartite graph.
+
+    Note that this derivative is NOT the true derivative of the approximate log-likelihood
+    """
+    def forward_cpu(self, ):
+        pass
+
+    def backward_cpu(self):

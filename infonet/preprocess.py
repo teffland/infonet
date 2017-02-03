@@ -12,9 +12,9 @@ def Entity_BIO_map(mention_labels, annotation):
     """ Uses BIO scheme (untyped) for entities only """
     if annotation['node-type'] == 'entity':
         left, right = tuple(annotation['ann-span'])
-        mention_labels[left] = 'B'
+        mention_labels[left] = 'B-entity'
         for i in range(1, right-left):
-            mention_labels[left+i] = 'I'
+            mention_labels[left+i] = 'I-entity'
     return mention_labels
 
 def E_BIO_map(mention_labels, annotation):
@@ -40,9 +40,9 @@ def Entity_typed_BIO_map(mention_labels, annotation):
     if annotation['node-type'] == 'entity':
         mention_type = annotation['type']
         left, right = tuple(annotation['ann-span'])
-        mention_labels[left] = 'B-'+mention_type
+        mention_labels[left] = 'B-entity-'+mention_type
         for i in range(1, right-left):
-            mention_labels[left+i] = 'I-'+mention_type
+            mention_labels[left+i] = 'I-entity-'+mention_type
     return mention_labels
 
 def All_typed_BIO_map(mention_labels, annotation):
