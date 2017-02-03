@@ -44,7 +44,7 @@ class BipartiteCRF(ch.Link):
 
     def __call__(self,
                  mention_features, relation_features,
-                 mention_neighbors, relation_neighbors):
+                 mention_nbrs, relation_nbrs):
         # sizes of mention and relation layers
         M, R = mention_features.shape[0], relation_features.shape[0]
 
@@ -53,17 +53,48 @@ class BipartiteCRF(ch.Link):
         log_phi_r = F.log(self.calc_relation_scores(relation_features))
         log_phi_mr = F.log(self.calc_trans_scores(R))
 
-        # initialize marginal approximations
-        q_m = ch.Variable(np.zeros((M, self.n_mention_class)))
-        q_r = ch.Variable(np.zeros((M, self.n_mention_class)))
+        # initialize marginal approximations to uniform
+        q_m = ch.Variable(np.ones((M, self.n_mention_class))/float(self.n_mention_class))
+        q_r = ch.Variable(np.ones((M, self.n_relation_class))/float(self.n_relation_class))
 
 
     def mean_field(self, q_m, q_r,
                    log_phi_m, log_phi_r, log_phi_mr,
-                   mention_neighbors, relation_neighbors,
+                   mention_nbrs, relation_nbrs,
                    t_max=100, tol=.01):
         M, R = log_phi_m.shape[0], log_phi_r.shape[0]
-        t = 0
+        Cm, Cr = self.n_mention_class, self.n_relation_class
+        flat_log_phi_mr = F.reshape(log_phi_mr, (-1, Cm*Cr))
+        t, avg_diff = 0, 1e15
+        q_mt_prev = q_m
+        q_rt_prev = q_r
         while t < t_max and avg_diff > tol:
+            print 'Mean field: T:{0}, Diff:{1:2.4f}'.format(t, avg_diff)
             # calculate next q_m
             q_mt = log_phi_m #F.identity(log_phi_m)
+            for m_nbr in mention_nbrs:
+                q_mt, q_mt_rest = F.split_axis(q_mt, [m_nbr.shape[0]], axis=0)
+                nbr_phis = F.reshape(F.embed_id(m_nbr, flat_log_phi_mr),
+                                     (-1, Cm, Cr))
+                b_q_mt = F.broadcast_to(q_mt_prev, nbr_phis.shape)
+                q_mt += F.sum(b_q_mt * nbr_phis, axis=2)
+                q_mt = F.vstack([q_mt, q_mt_rest])
+            q_mt = F.softmax(q_mt)
+
+            # calculate next q_r
+            q_rt = log_phi_r
+            for r_nbr in relation_nbrs:
+                nbr_phis = F.reshape(F.embed_id(r_nbr, flat_log_phi_mr),
+                                     (-1, Cm, Cr))
+                b_q_rt = F.broadcast_to(q_rt_prev, nbr_phis.shape)
+                q_rt += F.sum(b_q_rt * nbr_phis, axis=1)
+            q_rt = F.softmax(q_rt)
+
+            # average absolute difference between marginals
+            avg_diff = np.asscalar(np.mean(np.hstack([
+                        np.absolute(q_mt.data-q_mt_prev.data).reshape(-1),
+                        np.absolute(q_rt.data-q_rt_prev.data).reshape(-1)])))
+            q_mt_prev = q_mt
+            q_rt_prev = q_rt
+            t += 1
+        return q_mt, q_rt

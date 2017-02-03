@@ -138,8 +138,9 @@ class Extractor(ch.Chain):
         all_mentions = [] # features for mentions
         all_mention_spans = [] # spans in doc for each mention
         all_mention_masks = [] # bool masks for constraining predictions
-        all_left_mention_idxs = [] # idxs for left mention of a relation in mention table
-        all_right_mention_idxs = [] # idxs for right mention of a relation in mention table
+        all_relation_left_nbrs = [] # idxs for left mention of a relation in mention table
+        all_relation_right_nbrs = [] # idxs for right mention of a relation in mention table
+        all_mention_nbrs = [] # idxs for relations connected to a mention
         all_relation_spans = [] # spans in doc for left and right mentions
         all_null_rel_spans = [] # predict null for mention pairs > max_rel_dist
         zipped = zip(all_boundaries, tagger_preds, features)
@@ -149,8 +150,9 @@ class Extractor(ch.Chain):
             mentions = []
             mention_spans = []
             mention_masks = []
-            left_mention_idxs = []
-            right_mention_idxs = []
+            relation_left_nbrs = []
+            relation_right_nbrs = []
+            mention_nbrs = []
             relation_spans = []
             null_rel_spans = []
             # left_mention_masks = []
@@ -167,17 +169,38 @@ class Extractor(ch.Chain):
                 # except those that are further than max_rel_dist away
                 # (prune for speed, accuracy)
                 for j in range(i):
-                # for j in range(moving_rel_idx, i):
-                    # print j,i
                     bj = boundaries[j]
                     if abs(bj[0] - b[0]) < self.max_rel_dist:
                         relation_spans.append((bj[0], bj[1], b[0], b[1]))
-                        left_mention_idxs.append(np.array(j).astype(np.int32))
-                        right_mention_idxs.append(np.array(i).astype(np.int32))
-                    # if that's too far, then it'll def be too far for the next
+                        # for each relation, keep track of its neighboring mentions
+                        # relation_left_nbrs.append(np.array(j).astype(np.int32))
+                        # relation_right_nbrs.append(np.array(i).astype(np.int32))
+                        relation_left_nbrs.append(j)
+                        relation_right_nbrs.append(i)
+                        # for each mention, keep track of its neighboring relations
+                        # and also, whether the mention is the left or right constituent
+                        r = len(relation_spans)
+                        mention_nbrs[j].append((r,0))
+                        if len(mention_nbrs) == i:
+                            mention_nbrs.append([(r,1)])
+                        else:
+                            mention_nbrs[i].append((r,1))
                     else:
                         null_rel_spans.append((bj[0], bj[1], b[0], b[1]))
-                        # moving_rel_idx = j
+
+            # rearrange mentions in order from most to least neighboring relations
+            # needed for inference in bipartite crf
+            assert len(mention_nbrs) == len(mentions)
+            sort_idxs = [x[0] for x in sorted(zip(range(len(mention_nbrs)), mention_nbrs),
+                                              key=lambda x:len(x[1]), reverse=True)]
+            mentions = [ mentions[i] for i in sort_idxs]
+            mention_nbrs = [ mention_nbrs[i] for i in sort_idxs ]
+            mention_masks = [ mention_masks[i] for i in sort_idxs ]
+            mention_spans = [ mention_spans[i] for i in sort_idxs ]
+            relation_left_nbrs = [ np.array(sort_idxs[lm_i]).astype(np.int32)
+                                  for lm_i in relation_left_nbrs ]
+            relation_right_nbrs = [ np.array(sort_idxs[rm_i]).astype(np.int32)
+                                  for rm_i in relation_right_nbrs ]
 
             # convert list of mentions to matrix and append
             mentions = F.vstack(mentions)
@@ -191,17 +214,18 @@ class Extractor(ch.Chain):
             all_mentions.append(mentions)
             all_mention_masks.append(mention_masks)
             all_mention_spans.append(m_spans)
+            all_mention_nbrs.append(mention_nbrs)
 
             # same for relations
-            left_mention_idxs = F.vstack(left_mention_idxs)
-            all_left_mention_idxs.append(left_mention_idxs)
-            right_mention_idxs = F.vstack(right_mention_idxs)
-            all_right_mention_idxs.append(right_mention_idxs)
+            relation_left_nbrs = F.vstack(relation_left_nbrs)
+            all_relation_left_nbrs.append(relation_left_nbrs)
+            relation_right_nbrs = F.vstack(relation_right_nbrs)
+            all_relation_right_nbrs.append(relation_right_nbrs)
             all_relation_spans.append(relation_spans)
             all_null_rel_spans.append(null_rel_spans)
 
-        return (all_mentions, all_mention_masks,
-                all_left_mention_idxs, all_right_mention_idxs,
+        return (all_mentions, all_mention_masks, all_mention_nbrs,
+                all_relation_left_nbrs, all_relation_right_nbrs,
                 all_mention_spans, all_relation_spans, all_null_rel_spans)
 
     def __call__(self, x_list, train=True, backprop_to_tagger=False):
@@ -256,8 +280,8 @@ class Extractor(ch.Chain):
             lstms = [ drop(f(self.mlp(h)) , self.dropout, train) for h in lstms ]
 
         # extract the information graph from the tagger
-        (mentions, mention_masks,
-        left_idxs, right_idxs,
+        (mentions, mention_masks, mention_nbrs,
+        relation_left_nbrs, relation_right_nbrs,
          m_spans, r_spans, null_r_spans) = self._extract_graph(tagger_preds,lstms)
         # print [m.shape for m in mentions]
 
@@ -271,20 +295,20 @@ class Extractor(ch.Chain):
         # get features and type constraints for left and right mentions
         embed_id = F.embed_id
         left_mentions = [ F.squeeze(embed_id(idxs, ms))
-                          for idxs, ms in zip(left_idxs, mentions) ]
+                          for idxs, ms in zip(relation_left_nbrs, mentions) ]
         right_mentions = [ F.squeeze(embed_id(idxs, ms))
-                          for idxs, ms in zip(right_idxs, mentions) ]
+                          for idxs, ms in zip(relation_right_nbrs, mentions) ]
 
         mention_dists = [ F.reshape(F.squeeze(embed_id(r_idxs, mspan)
                           - embed_id(l_idxs, mspan), axis=1)[:,0], (-1,1))
-                          for l_idxs, r_idxs, mspan in zip(left_idxs, right_idxs, m_spans)]
-        # print embed_id(right_idxs[0], m_spans[0]).shape, mention_dists[0].shape, left_mentions[0].shape, right_mentions[0].shape
+                          for l_idxs, r_idxs, mspan in zip(relation_left_nbrs, relation_right_nbrs, m_spans)]
+        # print embed_id(relation_right_nbrs[0], m_spans[0]).shape, mention_dists[0].shape, left_mentions[0].shape, right_mentions[0].shape
         left_masks = [ F.squeeze(embed_id(F.cast(embed_id(idxs, preds), 'int32'),
                                 self.left_masks))
-                       for idxs, preds in zip(left_idxs, m_preds) ]
+                       for idxs, preds in zip(relation_left_nbrs, m_preds) ]
         right_masks = [ F.squeeze(embed_id(F.cast(embed_id(idxs, preds), 'int32'),
                                  self.right_masks))
-                       for idxs, preds in zip(right_idxs, m_preds) ]
+                       for idxs, preds in zip(relation_right_nbrs, m_preds) ]
         rel_masks = [ l_mask * r_mask for l_mask, r_mask in zip(left_masks, right_masks) ]
 
         # concat left and right mentions into one vector per relation
