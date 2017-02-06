@@ -1,5 +1,6 @@
 import json
 import io
+import random
 from scipy.misc import comb # to check for num relations
 
 from infonet.vocab import Vocab
@@ -86,12 +87,12 @@ def Entity_typed_BILOU_map(mention_labels, annotation):
         mention_type = annotation['type']
         left, right = tuple(annotation['ann-span'])
         if left == (right-1):
-            mention_labels[left] = 'U-'+mention_type
+            mention_labels[left] = 'U-entity-'+mention_type
         else:
-            mention_labels[left] = 'B-'+mention_type
+            mention_labels[left] = 'B-entity-'+mention_type
             for i in range(1, right-left-1):
-                mention_labels[left+i] = 'I-'+mention_type
-            mention_labels[right-1] = 'L-'+mention_type
+                mention_labels[left+i] = 'I-entity-'+mention_type
+            mention_labels[right-1] = 'L-entity-'+mention_type
     return mention_labels
 
 def BIO_map(mention_labels, annotation):
@@ -289,7 +290,10 @@ def resolve_annotations(annotations):
                 resolved_annotations.append(ann)
     return resolved_annotations
 
-def get_ace_extraction_data(count=0, map_func_name='NoVal_BIO_map', **kwds):
+def get_ace_extraction_data(count=0,
+                            map_func_name='NoVal_BIO_map',
+                            oversample_unks=True,
+                            **kwds):
     print "Loading data..."
     # load data
     train_data = json.loads(io.open('data/ace_05_head_yaat_train.json', 'r').read())
@@ -299,13 +303,16 @@ def get_ace_extraction_data(count=0, map_func_name='NoVal_BIO_map', **kwds):
 
     # get vocabs and generate info network annotations
     token_vocab = Vocab(min_count=count)
+    pos_vocab = Vocab(min_count=0)
     boundary_vocab = Vocab(min_count=0)
     mention_vocab = Vocab(min_count=0)
     relation_vocab = Vocab(min_count=0)
     for dataset_i, docs in enumerate([train_data.values(), dev_data.values(), test_data.values()]):
         for doc in docs:
-            if dataset_i==0: # use only train data to estimate vocabs
+            if dataset_i ==0: #< 2: # use only train data to estimate vocabs
                 token_vocab.add(doc['tokens'])
+
+            pos_vocab.add(doc['pos'])
 
             # dedupe and remove nestings/overlaps
             doc['annotations'] = resolve_annotations(doc['annotations'])
@@ -354,6 +361,9 @@ def get_ace_extraction_data(count=0, map_func_name='NoVal_BIO_map', **kwds):
     x_train = [ doc['tokens'] for doc in train_data.values() ]
     x_dev = [ doc['tokens'] for doc in dev_data.values() ]
     x_test = [ doc['tokens'] for doc in test_data.values() ]
+    p_train = [ doc['pos'] for doc in train_data.values() ]
+    p_dev = [ doc['pos'] for doc in dev_data.values() ]
+    p_test = [ doc['pos'] for doc in test_data.values() ]
     b_train = [ doc['boundary_labels'] for doc in train_data.values() ]
     b_dev = [ doc['boundary_labels'] for doc in dev_data.values() ]
     b_test = [ doc['boundary_labels'] for doc in test_data.values() ]
@@ -366,9 +376,14 @@ def get_ace_extraction_data(count=0, map_func_name='NoVal_BIO_map', **kwds):
 
     # before converting drop infrequents
     token_vocab.drop_infrequent()
+    pos_vocab.drop_infrequent()
     boundary_vocab.drop_infrequent()
     mention_vocab.drop_infrequent()
     relation_vocab.drop_infrequent()
+
+    print "POS vocab:"
+    for i, v in pos_vocab._idx2vocab.items():
+        print '\t{}:: {}'.format(i,v)
 
     print "Boundary vocab:"
     for i, v in boundary_vocab._idx2vocab.items():
@@ -402,6 +417,9 @@ def get_ace_extraction_data(count=0, map_func_name='NoVal_BIO_map', **kwds):
     ix_train = convert_sequences(x_train, token_vocab.idx)
     ix_dev = convert_sequences(x_dev, token_vocab.idx)
     ix_test = convert_sequences(x_test, token_vocab.idx)
+    ip_train = convert_sequences(p_train, pos_vocab.idx)
+    ip_dev = convert_sequences(p_dev, pos_vocab.idx)
+    ip_test = convert_sequences(p_test, pos_vocab.idx)
     ib_train = convert_sequences(b_train, boundary_vocab.idx)
     ib_dev = convert_sequences(b_dev, boundary_vocab.idx)
     ib_test = convert_sequences(b_test, boundary_vocab.idx)
@@ -415,8 +433,29 @@ def get_ace_extraction_data(count=0, map_func_name='NoVal_BIO_map', **kwds):
     ir_test = convert_sequences(r_test, convert_relation)
     print '{} train, {} dev, and {} test documents'.format(len(x_train), len(x_dev), len(x_test))
 
+    # oversample unks in the train data so it has the same ratio as the dev data
+    if oversample_unks:
+        x_t = [token_vocab.token(i) for xs in ix_train for i in xs]
+        x_d = [token_vocab.token(i) for xs in ix_dev for i in xs]
+        train_unks_ratio = float(len([x for x in x_t if x == '<UNK>']))/len(x_t)
+        dev_unks_ratio = float(len([x for x in x_d if x == '<UNK>']))/len(x_d)
+        print "Oversampling training unks from {}% to {}%".format(
+            train_unks_ratio*100, dev_unks_ratio*100)
+        for i in range(len(ix_train)):
+            for j in range(len(ix_train[i])):
+                if random.uniform(0,1) < dev_unks_ratio:
+                    ix_train[i][j] = token_vocab.iunk
+
+        x_t = [token_vocab.token(i) for xs in ix_train for i in xs]
+        x_d = [token_vocab.token(i) for xs in ix_dev for i in xs]
+        train_unks_ratio = float(len([x for x in x_t if x == '<UNK>']))/len(x_t)
+        dev_unks_ratio = float(len([x for x in x_d if x == '<UNK>']))/len(x_d)
+        print "Resulting sampled ratios: Train:{}%, Dev:{}%".format(
+            train_unks_ratio*100, dev_unks_ratio*100)
+
     dataset = { # vocabs
                 'token_vocab':token_vocab,
+                'pos_vocab':pos_vocab,
                 'boundary_vocab':boundary_vocab,
                 'mention_vocab':mention_vocab,
                 'relation_vocab':relation_vocab,
@@ -424,29 +463,35 @@ def get_ace_extraction_data(count=0, map_func_name='NoVal_BIO_map', **kwds):
                 'tag_map':tag_map,
                 'mtype2msubtype':mtype2msubtype,
                 'msubtype2rtype':msubtype2rtype,
-                # tokenized data
+                # tokenized data and labels
                 'x_train':x_train,
+                'p_train':p_train,
                 'b_train':b_train,
                 'm_train':m_train,
                 'r_train':r_train,
                 'x_dev':x_dev,
+                'p_dev':p_dev,
                 'b_dev':b_dev,
                 'm_dev':m_dev,
                 'r_dev':r_dev,
                 'x_test':x_test,
+                'p_test':p_test,
                 'b_test':b_test,
                 'm_test':m_test,
                 'r_test':r_test,
                 # data converted to indices
                 'ix_train':ix_train,
+                'ip_train':ip_train,
                 'ib_train':ib_train,
                 'im_train':im_train,
                 'ir_train':ir_train,
                 'ix_dev':ix_dev,
+                'ip_dev':ip_dev,
                 'ib_dev':ib_dev,
                 'im_dev':im_dev,
                 'ir_dev':ir_dev,
                 'ix_test':ix_test,
+                'ip_test':ip_test,
                 'ib_test':ib_test,
                 'im_test':im_test,
                 'ir_test':ir_test

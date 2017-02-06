@@ -335,10 +335,12 @@ def convert_charspans_to_tokenspans(nodes, spacy_doc):
     """ create a function that buckets char idxs to token idxs"""
     char2token_idxmap = {}
     tokens = [] # the tokenization of the document as list(unicode)
+    pos = []
     j = 0
     for token_idx, token in enumerate(spacy_doc):
         token_width = len(token) + len(token.whitespace_)
         tokens.append(token.text)
+        pos.append(token.pos_)
         for i in range(token_width):
             char2token_idxmap[j] = token_idx
             j +=1
@@ -351,7 +353,79 @@ def convert_charspans_to_tokenspans(nodes, spacy_doc):
     for node in nodes:
         node['ann-span'] = charspan2tokenspan(node['ann-span'])
 
-    return nodes, tokens
+    return nodes, tokens, pos
+
+    # """ Converts document level annotations at the character level
+    # to token level annotations at the sentence level.
+    #
+    # Also return the tokenized document as sentences and include pos tags
+    # """
+    # char2token_idxmap = {}
+    # char2sent_idxmap = {}
+    # sentidx2tokenoffset = [0]
+    # doc_tokens, doc_pos = [], []
+    # j = 0
+    # for sent_idx, sent in enumerate(spacy_doc.sents):
+    #     sent_tokens, sent_pos = [], []
+    #     for token_idx, token in enumerate(sent):
+    #         token_width = len(token) + len(token.whitespace_)
+    #         sent_tokens.append(token.text)
+    #         sent_pos.append(token.pos_)
+    #         for i in range(token_width):
+    #             char2sent_idxmap[j] = sent_idx
+    #             char2token_idxmap[j] = token_idx
+    #             j += 1
+    #     doc_tokens.append(sent_tokens)
+    #     doc_pos.append(sent_pos)
+    #     sentidx2tokenoffset.append(sentidx2tokenoffset[-1]+token_idx)
+    #
+    # def charspan2tokenspan((char_start, char_end)):
+    #     if char2sent_idxmap[char_start] != char2sent_idxmap[char_end]:
+    #         # print sentidx2tokenoffset
+    #         print "tag spanning across sentences...{},{}\n'{}'".format(
+    #         char2sent_idxmap[char_start], char2sent_idxmap[char_end],
+    #         spacy_doc[sentidx2tokenoffset[char2sent_idxmap[char_start]-5]+char2token_idxmap[char_start]:
+    #         sentidx2tokenoffset[char2sent_idxmap[char_end]+5]+char2token_idxmap[char_end]+1])
+    #         raise ValueError
+    #     return (char2token_idxmap[char_start],
+    #             char2token_idxmap[char_end]+1,
+    #             char2sent_idxmap[char_end])
+    # for node in nodes:
+    #     try:
+    #         node['ann-span'] = charspan2tokenspan(node['ann-span'])
+    #     except ValueError:
+    #         print spacy_doc.text[node['ann-span'][0]:node['ann-span'][1]+1]
+    #         print "Invalid node {}".format(node)
+    #         print
+    #         quit()
+
+
+    # """ create a function that buckets char idxs to token idxs"""
+    # char2token_idxmap = {}
+    # tokens = [] # the tokenization of the document as list(unicode)
+    # j = 0
+    # for token_idx, token in enumerate(spacy_doc):
+    #     token_width = len(token) + len(token.whitespace_)
+    #     tokens.append(token.text)
+    #     for i in range(token_width):
+    #         char2token_idxmap[j] = token_idx
+    #         j +=1
+    #
+    # def charspan2tokenspan((char_start, char_end)):
+    #     # add 1 to support python style indexing
+    #     return (char2token_idxmap[char_start], char2token_idxmap[char_end]+1)
+    #
+    # now convert the charspans in the nodes
+    # for node in nodes:
+    #     try:
+    #         node['ann-span'] = charspan2tokenspan(node['ann-span'])
+    #     except ValueError:
+    #         print spacy_doc.text[node['ann-span'][0]:node['ann-span'][1]+1]
+    #         print "Invalid node {}".format(node)
+    #         print
+    #         quit()
+    #
+    # return nodes, doc_tokens, doc_pos
 
 def extract_doc(text_f, ann_f, spacy_pipe, use_head_span=True):
     """ Do all of the extractions for a document """
@@ -382,8 +456,8 @@ def extract_doc(text_f, ann_f, spacy_pipe, use_head_span=True):
     text = text.replace('\n', ' ')
     # now tokenize the document and convert annotation charspans to token spans
     doc = spacy_pipe(text)
-    nodes, tokens = convert_charspans_to_tokenspans(nodes, doc)
-    return doc_id, text, tokens, nodes, edges
+    nodes, tokens, pos = convert_charspans_to_tokenspans(nodes, doc)
+    return doc_id, text, tokens, pos, nodes, edges
 
 if __name__ == '__main__':
     print "Loading Spacy..."
@@ -406,20 +480,23 @@ if __name__ == '__main__':
     start = time()
     for doc_i, (text_f, ann_f) in enumerate(zip(text_files, annotation_files)):
         print '\rExtracting Document {} / {} : {}'.format(doc_i, n, "/".join(ann_f.split('/')[-3:]))
-        doc_id, text, tokens, nodes, edges = extract_doc(text_f, ann_f, nlp)
+        doc_id, text, tokens, pos, nodes, edges = extract_doc(text_f, ann_f, nlp)
         fname = ann_f.split('/')[-1][:-7]
         # print ann_f, fname
         if fname in train_set:
             train_annotations[doc_id] = {'text':text,
                                        'tokens':tokens,
+                                       'pos':pos,
                                        'annotations':nodes+edges}
         elif fname in dev_set:
             dev_annotations[doc_id] = {'text':text,
                                        'tokens':tokens,
+                                       'pos':pos,
                                        'annotations':nodes+edges}
         elif fname in test_set:
             test_annotations[doc_id] = {'text':text,
                                        'tokens':tokens,
+                                       'pos':pos,
                                        'annotations':nodes+edges}
         else:
             continue

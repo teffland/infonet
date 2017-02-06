@@ -38,7 +38,7 @@ def dump_stats(STATS, model_name):
 def train(dataset, STATS, model_name,
           batch_size, n_epoch, wait,
           embedding_size, lstm_size, learning_rate,
-          crf_type, dropout,
+          crf_type, dropout, pos_d,
           weight_decay, grad_clip,
           bidirectional, use_mlp,
           n_layers, use_hdropout,
@@ -47,11 +47,15 @@ def train(dataset, STATS, model_name,
           **kwds):
     # unpack dataset
     token_vocab = dataset['token_vocab']
+    pos_vocab = dataset['pos_vocab']
     boundary_vocab = dataset['boundary_vocab']
     tag_map = dataset['tag_map']
     ix_train = dataset['ix_train']
     ix_dev = dataset['ix_dev']
     ix_test = dataset['ix_test']
+    ip_train = dataset['ip_train']
+    ip_dev = dataset['ip_dev']
+    ip_test = dataset['ip_test']
     ib_train = dataset['ib_train']
     ib_dev = dataset['ib_dev']
     ib_test = dataset['ib_test']
@@ -62,6 +66,9 @@ def train(dataset, STATS, model_name,
     x_train = dataset['x_train']
     x_dev = dataset['x_dev']
     x_test = dataset['x_test']
+    p_train = dataset['p_train']
+    p_dev = dataset['p_dev']
+    p_test = dataset['p_test']
     b_train = dataset['b_train']
     b_dev = dataset['b_dev']
     b_test = dataset['b_test']
@@ -71,10 +78,9 @@ def train(dataset, STATS, model_name,
 
     print tag_map
     print len(tag_map['tag2mtype']), ' output labels'
-    # train_iter = SequenceIterator(zip(ix_train, ib_train, im_train), batch_size, repeat=True)
-    train_iter = SequenceIterator(zip(ix_train+ix_dev, ib_train+ib_dev, im_train+im_dev), batch_size, repeat=True)
-    dev_iter = SequenceIterator(zip(ix_dev, ib_dev, im_dev), batch_size, repeat=True)
-    test_iter = SequenceIterator(zip(ix_test, ib_test, im_test), batch_size, repeat=True)
+    train_iter = SequenceIterator(zip(ix_train, ip_train, ib_train, im_train), batch_size, repeat=True)
+    dev_iter = SequenceIterator(zip(ix_dev, ip_dev, ib_dev, im_dev), batch_size, repeat=True)
+    test_iter = SequenceIterator(zip(ix_test, ip_test, ib_test, im_test), batch_size, repeat=True)
 
     # get pretrained vectors
     if w2v_fname:
@@ -93,8 +99,8 @@ def train(dataset, STATS, model_name,
         embeddings = npr.normal(size=(token_vocab.v, embedding_size))
 
     # model
-    # embeddings = np.zeros((token_vocab.v, embedding_size))
     tagger = Tagger(embeddings, lstm_size, boundary_vocab.v,
+                    pos_d=pos_d, pos_v=pos_vocab.v,
                     crf_type=crf_type,
                     dropout=dropout,
                     bidirectional=bidirectional,
@@ -103,65 +109,7 @@ def train(dataset, STATS, model_name,
                     n_layers=n_layers)
     model_loss = TaggerLoss(tagger)
 
-    # class MyAdam(ch.optimizers.Adam):
-    #     def update(self, lossfun=None, *args, **kwds):
-    #         """Updates parameters based on a loss function or computed gradients.
-    #
-    #         This method runs in two ways.
-    #
-    #         - If ``lossfun`` is given, then use it as a loss function to compute
-    #           gradients.
-    #         - Otherwise, this method assumes that the gradients are already
-    #           computed.
-    #
-    #         In both cases, the computed gradients are used to update parameters.
-    #         The actual update routines are defined by the :meth:`update_one`
-    #         method (or its CPU/GPU versions, :meth:`update_one_cpu` and
-    #         :meth:`update_one_gpu`).
-    #
-    #         """
-    #         if lossfun is not None:
-    #             use_cleargrads = getattr(self, '_use_cleargrads', False)
-    #             loss = lossfun(*args, **kwds)
-    #             if use_cleargrads:
-    #                 self.target.cleargrads()
-    #             else:
-    #                 self.target.zerograds()
-    #             loss.backward()
-    #             del loss
-    #
-    #         # TODO(unno): Some optimizers can skip this process if they does not
-    #         # affect to a parameter when its gradient is zero.
-    #         for name, param in self.target.namedparams():
-    #             if param.grad is None:
-    #                 print name, param.name, 'has no grad'
-    #                 # with cuda.get_device(param.data):
-    #                 #     xp = cuda.get_array_module(param.data)
-    #                 #     param.grad = xp.zeros_like(param.data)
-    #                 param.grad = np.zeros_like(param.data)
-    #
-    #         self.call_hooks()
-    #         self.prepare()
-    #
-    #         self.t += 1
-    #         states = self._states
-    #         for name, param in self.target.namedparams():
-    #             # with cuda.get_device(param.data):
-    #             print name,
-    #             self.update_one(param, states[name])
-    #
-    #     def update_one_cpu(self, param, state):
-    #         m, v = state['m'], state['v']
-    #         grad = param.grad
-    #         print param.name
-    #         print 'data', param.data[:5]
-    #         print 'grad', grad[:5]
-    #         m += (1 - self.beta1) * (grad - m)
-    #         v += (1 - self.beta2) * (grad * grad - v)
-    #         param.data -= self.lr * m / (np.sqrt(v) + self.eps)
-    # optimizer = MyAdam(learning_rate)
     optimizer = ch.optimizers.Adam(learning_rate)
-    # optimizer = ch.optimizers.AdaDelta()
     optimizer.setup(model_loss)
     optimizer.add_hook(ch.optimizer.WeightDecay(weight_decay))
     optimizer.add_hook(ch.optimizer.GradientClipping(grad_clip))
@@ -173,25 +121,29 @@ def train(dataset, STATS, model_name,
                  boundary_vocab=boundary_vocab,
                  tag_map=tag_map,
                  keep_raw=False):
-        all_preds, all_xs, all_bs, all_ms = [], [], [], []
+        all_preds, all_xs, all_ps, all_bs, all_ms = [], [], [], [], []
         for batch in batch_iter:
-            x_list, b_list, m_list = zip(*batch)
-            preds = tagger.predict(sequences2arrays(x_list))
+            x_list, p_list, b_list, m_list = zip(*batch)
+            preds = tagger.predict(sequences2arrays(x_list),
+                                   sequences2arrays(p_list))
             preds = [pred.data for pred in ch.functions.transpose_sequence(preds) ]
             # for p in preds:
             #     print p.shape, p
             all_preds.extend(preds)
             all_xs.extend(x_list)
+            all_ps.extend(p_list)
             all_bs.extend(b_list)
             if batch_iter.is_new_epoch:
                 break
         all_preds = convert_sequences(all_preds, boundary_vocab.token)
         all_xs = convert_sequences(all_xs, token_vocab.token)
+        all_ps = convert_sequences(all_ps, pos_vocab.token)
         all_bs = convert_sequences(all_bs, boundary_vocab.token)
         f1_stats = mention_boundary_stats(all_bs, all_preds, **tag_map)
         # keep raw predictions for error analysis
         if keep_raw:
             f1_stats['xs'] = all_xs
+            f1_stats['ps'] = all_ps
             f1_stats['b_trues'] = all_bs
             f1_stats['b_preds'] = all_preds
         return f1_stats
@@ -227,8 +179,9 @@ def train(dataset, STATS, model_name,
         for batch in train_iter:
             STATS['epoch'] = train_iter.epoch
             # prepare data and model
-            x_list, b_list, m_list = zip(*batch)
+            x_list, p_list, b_list, m_list = zip(*batch)
             x_list = sequences2arrays(x_list)
+            p_list = sequences2arrays(p_list)
             b_list = sequences2arrays(b_list)
             model_loss.cleargrads()
             tagger.reset_state()
@@ -237,7 +190,7 @@ def train(dataset, STATS, model_name,
             # run model
             start = time.time()
             # with ch.function_hooks.PrintHook():
-            loss = model_loss(x_list, b_list)
+            loss = model_loss(x_list, p_list, b_list)
             STATS['forward_times'].append(time.time()-start)
             loss_val = np.asscalar(loss.data)
             # print_batch_loss(loss_val,
@@ -297,9 +250,9 @@ def train(dataset, STATS, model_name,
     print 'Done'
 
     print 'Evaluating...'
-    train_iter = SequenceIterator(zip(ix_train, ib_train, im_train), batch_size, repeat=True, shuffle=False)
-    dev_iter = SequenceIterator(zip(ix_dev, ib_dev, im_dev), batch_size, repeat=True, shuffle=False)
-    test_iter = SequenceIterator(zip(ix_test, ib_test, im_test), batch_size, repeat=True, shuffle=False)
+    train_iter = SequenceIterator(zip(ix_train, ip_train, ib_train, im_train), batch_size, repeat=True, shuffle=False)
+    dev_iter = SequenceIterator(zip(ix_dev, ip_dev, ib_dev, im_dev), batch_size, repeat=True, shuffle=False)
+    test_iter = SequenceIterator(zip(ix_test, ip_test, ib_test, im_test), batch_size, repeat=True, shuffle=False)
 
     f1_stats = evaluate(tagger, train_iter, keep_raw=True)
     print_stats('Training', f1_stats)
@@ -333,6 +286,10 @@ def parse_args():
     parser.add_argument('-d', '--embedding_size',
                         default=50,
                         help='Size of token embeddings',
+                        type=int)
+    parser.add_argument('-p', '--pos_d',
+                        default=25,
+                        help='Size of POS embeddings',
                         type=int)
     parser.add_argument('--w2v_fname', type=str, default='',
                         help='Location of word vectors file')
@@ -378,7 +335,7 @@ def name_tagger(args):
     w2v = args.w2v_fname.split('/')[-1] if args.w2v_fname else ''
     bi = 'bi' if args.bidirectional else ''
     model_name = 'tagger_{bi}_{a.embedding_size}_{a.lstm_size}_{a.crf_type}_{a.dropout}_\
-{a.n_epoch}_{a.batch_size}_{a.weight_decay}_{w2v}'.format(a=args, w2v=w2v, bi=bi)
+{a.n_epoch}_{a.batch_size}_{a.weight_decay}_{a.count}_{w2v}'.format(a=args, w2v=w2v, bi=bi)
     return model_name
 
 if __name__ == '__main__':

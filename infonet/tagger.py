@@ -10,6 +10,7 @@ from gru import GRU, BidirectionalGRU
 
 class Tagger(ch.Chain):
     def __init__(self, embeddings, lstm_size, out_size,
+                 pos_d, pos_v,
                  bidirectional=False,
                  use_mlp=False,
                  dropout=.25,
@@ -20,13 +21,13 @@ class Tagger(ch.Chain):
         hdropout = dropout if use_hdropout else 0.0
         if bidirectional:
             feature_size = 2*lstm_size
-            lstms = [BidirectionalGRU(lstm_size, n_inputs=embeddings.shape[1],
+            lstms = [BidirectionalGRU(lstm_size, n_inputs=embeddings.shape[1]+pos_d,
                                       dropout=hdropout)]
             for i in range(1,n_layers):
                 lstms.append(BidirectionalGRU(lstm_size, n_inputs=feature_size, dropout=hdropout))
         else:
             feature_size = lstm_size
-            lstms = [GRU(lstm_size, n_inputs=embeddings.shape[1], dropout=hdropout)]
+            lstms = [GRU(lstm_size, n_inputs=embeddings.shape[1]+pos_d, dropout=hdropout)]
             for i in range(1,n_layers):
                 lstms.append(GRU(lstm_size, n_inputs=feature_size, dropout=hdropout))
 
@@ -39,7 +40,8 @@ class Tagger(ch.Chain):
 
         super(Tagger, self).__init__(
             embed = L.EmbedID(embeddings.shape[0], embeddings.shape[1],
-                                     embeddings),
+                              embeddings),
+            pos_embed = L.EmbedID(pos_v, pos_d),
             mlp = L.Linear(feature_size, feature_size),
             out = L.Linear(feature_size, feature_size),
             logit = L.Linear(feature_size, out_size),
@@ -49,6 +51,7 @@ class Tagger(ch.Chain):
         for i, lstm in enumerate(self.lstms):
             self.add_link('lstm_{}'.format(i), lstm)
         self.embedding_size = embeddings.shape[1]
+        self.pos_d = pos_d
         self.lstm_size = lstm_size
         self.feature_size = feature_size
         self.out_size = out_size
@@ -61,9 +64,14 @@ class Tagger(ch.Chain):
         for lstm in self.lstms:
             lstm.reset_state()
 
-    def __call__(self, x_list, train=True, return_logits=False):
+    def __call__(self, x_list, p_list, train=True, return_logits=False):
         drop = F.dropout
-        self.embeds = [ drop(self.embed(x), self.dropout, train) for x in x_list ]
+        embeds = [ drop(self.embed(x), self.dropout, train) for x in x_list ]
+        if self.pos_d > 0:
+            pos_embeds = [ drop(self.pos_embed(p), self.dropout, train) for p in p_list ]
+            self.embeds = [F.hstack([x,p]) for x,p in zip(embeds, pos_embeds)]
+        else:
+            self.embeds = embeds
 
         # run lstm layer over embeddings
         if self.bidirectional:
@@ -116,14 +124,14 @@ class Tagger(ch.Chain):
         else:
             return lstms
 
-    def predict(self, x_list, reset=True, return_features=False, train=False, **kwds):
+    def predict(self, x_list, p_list, reset=True, return_features=False, train=False, **kwds):
         if reset:
             self.reset_state()
         if self.crf_type:
-            features = self(x_list, train=train, return_logits=False)
+            features = self(x_list, p_list, train=train, return_logits=False)
             _, preds = self.crf.argmax(features)
         else:
-            features = self(x_list, train=train, return_logits=True)
+            features = self(x_list, p_list, train=train, return_logits=True)
             preds = [ ch.functions.argmax(logit, axis=1) for logit in features ]
         if return_features:
             return preds, features
@@ -148,17 +156,17 @@ class TaggerLoss(ch.Chain):
         )
         self.loss_func = loss_func
 
-    def __call__(self, x_list, b_list, features=None):
+    def __call__(self, x_list, p_list, b_list, features=None):
         # inputting features skips evaluation of the network
         if self.tagger.crf_type:
             if features is None:
-                features = self.tagger(x_list)
+                features = self.tagger(x_list, p_list)
             return self.tagger.crf(features, b_list)
 
         elif self.loss_func == ch.functions.softmax_cross_entropy:
             loss = 0
             if features is None:
-                features = self.tagger(x_list, return_logits=True)
+                features = self.tagger(x_list, p_list, return_logits=True)
             for logit, b in zip(features, b_list):
                 loss += self.loss_func(logit, b)
             return loss / float(len(b_list))
