@@ -38,13 +38,16 @@ def dump_stats(STATS, model_name):
 def train(dataset, tagger,
           STATS, model_name,
           batch_size, n_epoch, wait,
-          lstm_size, use_mlp, bidirectional, shortcut_embeds,
+          lstm_size, use_mlp,
+          bidirectional, shortcut_embeds,
+          rel_window,
           learning_rate, dropout, backprop, downsample, reweight,
           eval_only=False,
           max_dist=500,
           **kwds):
     # unpack dataset
     token_vocab = dataset['token_vocab']
+    pos_vocab = dataset['pos_vocab']
     boundary_vocab = dataset['boundary_vocab']
     mention_vocab = dataset['mention_vocab']
     relation_vocab = dataset['relation_vocab']
@@ -71,6 +74,9 @@ def train(dataset, tagger,
     ix_train = dataset['ix_train']
     ix_dev = dataset['ix_dev']
     ix_test = dataset['ix_test']
+    ip_train = dataset['ip_train']
+    ip_dev = dataset['ip_dev']
+    ip_test = dataset['ip_test']
     ib_train = dataset['ib_train']
     ib_dev = dataset['ib_dev']
     ib_test = dataset['ib_test']
@@ -84,11 +90,11 @@ def train(dataset, tagger,
     # print tag_map
 
     # data
-    train_iter = SequenceIterator(zip(x_train, ix_train, ib_train, im_train, ir_train),
+    train_iter = SequenceIterator(zip(x_train, ix_train, ip_train, ib_train, im_train, ir_train),
         batch_size, repeat=True)
-    dev_iter = SequenceIterator(zip(x_dev, ix_dev, ib_dev, im_dev, ir_dev),
+    dev_iter = SequenceIterator(zip(x_dev, ix_dev, ip_dev, ib_dev, im_dev, ir_dev),
         batch_size, repeat=True)
-    test_iter = SequenceIterator(zip(x_test, ix_test, ib_test, im_test, ir_test),
+    test_iter = SequenceIterator(zip(x_test, ix_test, ip_test, ib_test, im_test, ir_test),
         batch_size, repeat=True)
 
     # model
@@ -100,6 +106,7 @@ def train(dataset, tagger,
                           use_mlp=use_mlp,
                           bidirectional=bidirectional,
                           shortcut_embeds=shortcut_embeds,
+                          relation_outer_window=rel_window,
                           start_tags=start_tags, in_tags=in_tags, out_tags=out_tags,
                           tag2mtype=tag2mtype,
                           mtype2msubtype=mtype2msubtype,
@@ -116,17 +123,21 @@ def train(dataset, tagger,
                  relation_vocab=relation_vocab,
                  keep_raw=False):
         all_truexs, all_xs = [], []
+        all_ps = []
         all_bs, all_bpreds = [], []
         all_ms, all_mpreds = [], []
         all_rs, all_rpreds = [], []
         for batch in batch_iter:
-            tx_list, x_list, b_list, m_list, r_list = zip(*batch)
+            tx_list, x_list, p_list, b_list, m_list, r_list = zip(*batch)
             all_truexs.extend(tx_list)
             all_xs.extend(x_list)
+            all_ps.extend(p_list)
             all_bs.extend(b_list)
             all_ms.extend(m_list)
             all_rs.extend(r_list)
-            b_preds, m_preds, r_preds, m_spans, r_spans = extractor.predict(sequences2arrays(x_list))
+            x_list = sequences2arrays(x_list)
+            p_list = sequences2arrays(p_list)
+            b_preds, m_preds, r_preds, m_spans, r_spans = extractor.predict(x_list, p_list)
             b_preds = [ pred.data for pred in ch.functions.transpose_sequence(b_preds) ]
             all_bpreds.extend(b_preds)
             mp_list = [ [ (s[0],s[1], p) for p,s in zip(preds, spans)]
@@ -142,6 +153,7 @@ def train(dataset, tagger,
         #         for rpreds in all_rpreds]
         # print [(len(rs), len(rpreds)) for rs, rpreds in zip(all_rs, all_rpreds)]
         all_xs = convert_sequences(all_xs, token_vocab.token)
+        all_ps = convert_sequences(all_ps, pos_vocab.token)
         all_bs = convert_sequences(all_bs, boundary_vocab.token)
         all_bpreds = convert_sequences(all_bpreds, boundary_vocab.token)
         convert_mention = lambda x: x[:-1]+(mention_vocab.token(x[-1]),) # type is last
@@ -158,6 +170,7 @@ def train(dataset, tagger,
         if keep_raw:
             f1_stats['true_xs'] = all_truexs
             f1_stats['xs'] = all_xs
+            f1_stats['ps'] = all_ps
             f1_stats['b_preds'] = all_bpreds
             f1_stats['b_trues'] = all_bs
             f1_stats['m_preds'] = all_mpreds
@@ -198,8 +211,9 @@ def train(dataset, tagger,
         for batch in train_iter:
             STATS['epoch'] = train_iter.epoch
             # prepare data and model
-            _, x_list, b_list, m_list, r_list = zip(*batch)
+            _, x_list, p_list, b_list, m_list, r_list = zip(*batch)
             x_list = sequences2arrays(x_list)
+            p_list = sequences2arrays(p_list)
             b_list = sequences2arrays(b_list)
             extractor.reset_state()
             extractor_loss.cleargrads()
@@ -207,8 +221,8 @@ def train(dataset, tagger,
 
             # run model
             start = time.time()
-            r_loss = True if train_iter.epoch > 30 else False
-            loss = extractor_loss(x_list, b_list, m_list, r_list,
+            r_loss = True #if train_iter.epoch > 30 else False
+            loss = extractor_loss(x_list, p_list, b_list, m_list, r_list,
                                   backprop_to_tagger=backprop,
                                   downsample=downsample,
                                   reweight=reweight,
@@ -311,6 +325,9 @@ def parse_args():
                         type=float)
     parser.add_argument('--lstm_size',
                         default=50,
+                        type=int)
+    parser.add_argument('--rel_window',
+                        default=5,
                         type=int)
     parser.add_argument('--backprop', action='store_true', default=False)
     parser.add_argument('--use_mlp', action='store_true', default=False)
