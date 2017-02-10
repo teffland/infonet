@@ -2,6 +2,9 @@
 
 Pretty much a complete rewrite.
 
+TODO: Instead of rescaling activations during training with dropout, which has numerical instabilities,
+instead rescale the weights after training by the same factors.
+
 http://docs.chainer.org/en/stable/_modules/chainer/links/connection/gru.html#StatefulGRU
 """
 import numpy as np
@@ -85,6 +88,9 @@ class GRU(ch.Link):
     def reset_state(self):
         self.h = None
         self.h_drop_mask = None
+
+    def rescale_Us(self):
+        pass
 
     def __call__(self, x, train=True):
         # set the state to zeros if no prior state

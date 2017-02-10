@@ -111,7 +111,8 @@ class ApproxBipartiteCRF(F.Function):
     Its derivative is the approximation to the negative conditional log-likelihood
     of the bipartite graph.
 
-    Note that this derivative is NOT the true derivative of the approximate log-likelihood
+    Note that this derivative is NOT the true derivative of the approximate log-likelihood.
+    It is an approximation of the gradient of the true log-likelihood.
     """
     def forward_cpu(self, ):
         pass
