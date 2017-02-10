@@ -29,25 +29,17 @@ class GRU(ch.Link):
     where :math:`h` is current hidden vector.
     """
     def __init__(self, n_units, n_inputs=None,
-                #  W_init=None, U_init=None,
                  WU_init=None,
                  bias_init=None,
-                 dropout=0.):
+                 dropout=0.0,
+                 hdropout=0.0):
         self.dropout = dropout
+        self.hdropout = hdropout
         if n_inputs is None:
             n_inputs = n_units
         self.n_inputs = n_inputs
         self.n_units = n_units
         super(GRU, self).__init__(
-            # W_r=(n_inputs, n_units),
-            # U_r=(n_units, n_units),
-            # b_r=(n_units,),
-            # W_z=(n_inputs, n_units),
-            # U_z=(n_units, n_units),
-            # b_z=(n_units,),
-            # W_h=(n_inputs, n_units),
-            # U_h=(n_units, n_units),
-            # b_h=(n_units,)
             WU_r=(n_inputs+n_units, n_units),
             b_r =(n_units,),
             WU_z=(n_inputs+n_units, n_units),
@@ -56,16 +48,6 @@ class GRU(ch.Link):
             b_h =(n_units,),
         )
         # initialize params
-        # if not W_init:
-        #     W_init = ch.initializers.GlorotUniform(scale=1.0)
-        # W_init(self.W_r.data)
-        # W_init(self.W_z.data)
-        # W_init(self.W_h.data)
-        # if not U_init:
-        #     U_init = ch.initializers.Orthogonal(scale=1.0)
-        # U_init(self.U_r.data)
-        # U_init(self.U_z.data)
-        # U_init(self.U_h.data)
         if not WU_init:
             WU_init = ch.initializers.GlorotUniform()
         WU_init(self.WU_r.data)
@@ -79,66 +61,67 @@ class GRU(ch.Link):
 
         self.reset_state()
 
-    def set_state(self, array):
+    def set_state(self, array, train=True):
         self.h = ch.Variable(array)
-        if self.dropout:
-            self.h, self.h_drop_mask = dropout(self.h, self.dropout, return_mask=True)
-            self.h_drop_mask.data[self.h_drop_mask.data != 0.] = 1.
+        if self.hdropout:
+            self.h_mask = np.random.rand(*array.shape) > self.hdropout
+            if train:
+                self.h *= self.h_mask
+        else:
+            self.h_mask = None
 
     def reset_state(self):
         self.h = None
-        self.h_drop_mask = None
+        self.h_mask = None
 
     def rescale_Us(self):
-        pass
+        """ Rescale Us so activation are same in expectation at test time. """
+        if self.hdropout:
+            rate = 1./(1-self.hdropout)
+            self.WU_r.data[self.n_inputs:,:] *= rate
+            self.WU_z.data[self.n_inputs:,:] *= rate
+            self.WU_h.data[self.n_inputs:,:] *= rate
 
     def __call__(self, x, train=True):
         # set the state to zeros if no prior state
         batch_size = x.shape[0]
         state_shape = (batch_size, self.n_units)
         if self.h is None:
-            self.set_state(np.zeros(state_shape, dtype=x.dtype))
+            self.set_state(np.zeros(state_shape, dtype=x.dtype), train=train)
 
         # split off variable len seqs
         if self.h.shape[0] > batch_size:
             h, h_rest = F.split_axis(self.h, [batch_size], 0)
-            if self.h_drop_mask is not None:
-                h_drop_mask = self.h_drop_mask[:batch_size]
+            if self.h_mask is not None:
+                h_mask = self.h_mask[:batch_size]
         else:
             h, h_rest = self.h, None
-            if self.h_drop_mask is not None:
-                h_drop_mask = self.h_drop_mask
+            if self.h_mask is not None:
+                h_mask = self.h_mask
 
-        # apply horizontal dropout
-        # h = F.dropout(h, self.dropout, train=train)
-        if self.h_drop_mask is not None:
-            h = dropout(h, self.dropout, train=train, mask=h_drop_mask)
-            # print 'self.h', self.h.shape, self.h.size, np.sum(np.isnan(self.h.data))
-            # print 'h ', h.shape, h.size, np.sum(np.isnan(h.data)), np.argwhere(np.isnan(h.data))[:3]
         # run the cell
         xh = F.hstack([x, h])
         r = F.sigmoid(F.bias(F.matmul(xh, self.WU_r), self.b_r))
         z = F.sigmoid(F.bias(F.matmul(xh, self.WU_z), self.b_z))
         x_rh = F.hstack([x, r * h])
         hbar = F.tanh(F.bias(F.matmul(x_rh, self.WU_h), self.b_h))
-        # NOTE: usually h is calculated without squashing, but this coupled with the repeated dropout
-        # was causing steady explosion of h values due to repeated application of dropout scale factors
-        if self.h_drop_mask is not None:
-            # h = F.tanh((1.-z)*h + z*hbar)
-            h = (1.-z)*h + z*hbar
-        else:
-            h = (1.-z)*h + z*hbar
+        h = (1.-z)*h + z*hbar
+
+        # if using horizontal dropout apply now so it's persisted
+        if train and self.h_mask is not None:
+            h *= h_mask
 
         # persist state
         if h_rest is not None:
             self.h = F.vstack([h, h_rest])
         else:
             self.h = h
-        # self.h[:batch_size].data = h.data # carry over state
-        # if train:
-        #     self.h *= self.rnn_drop_mask
 
+        # apply regular dropout if not using hdropout
+        if train and self.h_mask is None and self.dropout:
+            h = F.dropout(h, self.dropout, train=train)
         return h
+
 
 class BidirectionalGRU(ch.Link):
     """ A stateful Bidirectional GRU implementation.
@@ -166,60 +149,33 @@ class BidirectionalGRU(ch.Link):
     NOTE: n_units are the number of units for each cell. So the output is double this
     """
     def __init__(self, n_units, n_inputs=None,
-                #  W_init=None, U_init=None,
                  WU_init=None,
                  bias_init=None,
-                 dropout=0.):
+                 dropout=0.0,
+                 hdropout=0.0):
         self.dropout = dropout
+        self.hdropout = hdropout
         if n_inputs is None:
             n_inputs = n_units
         self.n_inputs = n_inputs
         self.n_units = n_units
         super(BidirectionalGRU, self).__init__(
             # forward gru
-            # f_W_r=(n_inputs, n_units),
-            # f_U_r=(n_units, n_units),
             f_WU_r=(n_inputs+n_units, n_units),
             f_b_r=(n_units,),
-            # f_W_z=(n_inputs, n_units),
-            # f_U_z=(n_units, n_units),
             f_WU_z=(n_inputs+n_units, n_units),
             f_b_z=(n_units,),
-            # f_W_h=(n_inputs, n_units),
-            # f_U_h=(n_units, n_units),
             f_WU_h=(n_inputs+n_units, n_units),
             f_b_h=(n_units,),
             # backward gru
-            # b_W_r=(n_inputs, n_units),
-            # b_U_r=(n_units, n_units),
             b_WU_r=(n_inputs+n_units, n_units),
             b_b_r=(n_units,),
-            # b_W_z=(n_inputs, n_units),
-            # b_U_z=(n_units, n_units),
             b_WU_z=(n_inputs+n_units, n_units),
             b_b_z=(n_units,),
-            # b_W_h=(n_inputs, n_units),
-            # b_U_h=(n_units, n_units),
             b_WU_h=(n_inputs+n_units, n_units),
             b_b_h=(n_units,)
         )
         # initialize params
-        # if not W_init:
-        #     W_init = ch.initializers.GlorotUniform(scale=1.0)
-        # W_init(self.f_W_r.data)
-        # W_init(self.f_W_z.data)
-        # W_init(self.f_W_h.data)
-        # W_init(self.b_W_r.data)
-        # W_init(self.b_W_z.data)
-        # W_init(self.b_W_h.data)
-        # if not U_init:
-        #     U_init = ch.initializers.Orthogonal(scale=1.0)
-        # U_init(self.f_U_r.data)
-        # U_init(self.f_U_z.data)
-        # U_init(self.f_U_h.data)
-        # U_init(self.b_U_r.data)
-        # U_init(self.b_U_z.data)
-        # U_init(self.b_U_h.data)
         if not WU_init:
             WU_init = ch.initializers.GlorotUniform()
         WU_init(self.f_WU_r.data)
@@ -237,55 +193,37 @@ class BidirectionalGRU(ch.Link):
         bias_init(self.b_b_z.data)
         bias_init(self.b_b_h.data)
 
-        # concat W's and U's for matmul speed
-        # self.add_persistent('f_WU_r', ch.functions.vstack([self.f_W_r, self.f_U_r]))
-        # self.add_persistent('f_WU_z', ch.functions.vstack([self.f_W_z, self.f_U_z]))
-        # self.add_persistent('f_WU_h', ch.functions.vstack([self.f_W_h, self.f_U_h]))
-        # self.add_persistent('b_WU_r', ch.functions.vstack([self.b_W_r, self.b_U_r]))
-        # self.add_persistent('b_WU_z', ch.functions.vstack([self.b_W_z, self.b_U_z]))
-        # self.add_persistent('b_WU_h', ch.functions.vstack([self.b_W_h, self.b_U_h]))
-
-        # self.f_WU_r = ch.functions.vstack([self.f_W_r, self.f_U_r])
-        # self.f_WU_z = ch.functions.vstack([self.f_W_z, self.f_U_z])
-        # self.f_WU_h = ch.functions.vstack([self.f_W_h, self.f_U_h])
-        # self.b_WU_r = ch.functions.vstack([self.b_W_r, self.b_U_r])
-        # self.b_WU_z = ch.functions.vstack([self.b_W_z, self.b_U_z])
-        # self.b_WU_h = ch.functions.vstack([self.b_W_h, self.b_U_h])
-        # self.add_persistant('f_WU_r', )
-
-        # # concat fwd and bwd cells for matmul speed
-        # self.WU_r = ch.functions.hstack([self.f_WU_r, self.b_WU_r])
-        # self.WU_z = ch.functions.hstack([self.f_WU_z, self.b_WU_z])
-        # self.WU_h = ch.functions.hstack([self.f_WU_h, self.b_WU_h])
-
         self.reset_state()
 
-    def set_state(self, f_array, b_array):
+    def set_state(self, f_array, b_array, train=True):
         self.h_f = ch.Variable(f_array)
         self.h_b = ch.Variable(b_array)
-        # f_scale = f_array.dtype.type(1. / (1 - self.dropout))
-        # f_flag = np.random.rand(*f_array.shape) >= self.dropout
-        # self.f_rnn_drop_mask = ch.Variable(f_scale * f_flag)
-        # b_scale = b_array.dtype.type(1. / (1 - self.dropout))
-        # b_flag = np.random.rand(*b_array.shape) >= self.dropout
-        # self.b_rnn_drop_mask = ch.Variable(b_scale * b_flag)
-        # print self.b_rnn_drop_mask.shape
+        if self.hdropout:
+            self.h_mask_f = np.random.rand(*array.shape) > self.hdropout
+            self.h_mask_b = np.random.rand(*array.shape) > self.hdropout
+            if train:
+                self.h_f *= self.h_mask_f
+                self.h_b *= self.h_mask_b
+        else:
+            self.h_mask_f = None
+            self.h_mask_b = None
 
     def reset_state(self):
         self.h_f = None
         self.h_b = None
-        # self.f_rnn_drop_mask = None
-        # self.b_rnn_drop_mask = None
+
+    def rescale_Us(self):
+        """ Rescale Us so activation are same in expectation at test time. """
+        if self.hdropout:
+            rate = 1./(1-self.hdropout)
+            self.f_WU_r.data[self.n_inputs:,:] *= rate
+            self.f_WU_z.data[self.n_inputs:,:] *= rate
+            self.f_WU_h.data[self.n_inputs:,:] *= rate
+            self.b_WU_r.data[self.n_inputs:,:] *= rate
+            self.b_WU_z.data[self.n_inputs:,:] *= rate
+            self.b_WU_h.data[self.n_inputs:,:] *= rate
 
     def __call__(self, x_f, x_b, train=True):
-        # function shorthand
-        # sigmoid = ch.functions.sigmoid
-        # # sigmoid = ch.functions.hard_sigmoid
-        # tanh = ch.functions.tanh
-        # matmul = ch.functions.matmul
-        # hstack = ch.functions.hstack
-        # bcast_to = ch.functions.broadcast_to
-
         # set the state if needed
         f_batch_size = x_f.shape[0]
         b_batch_size = x_b.shape[0]
@@ -293,69 +231,49 @@ class BidirectionalGRU(ch.Link):
         b_state_shape = (b_batch_size, self.n_units)
         if self.h_f is None:
             self.set_state(np.zeros((f_batch_size, self.n_units), dtype=x_f.dtype),
-                           np.zeros((f_batch_size, self.n_units), dtype=x_b.dtype))
+                           np.zeros((f_batch_size, self.n_units), dtype=x_b.dtype),
+                           train=train)
 
         # split off variable len seqs
         if self.h_f.shape[0] > f_batch_size:
             h_f, h_f_rest = F.split_axis(self.h_f, [f_batch_size], 0)
-            # if self.h_drop_mask is not None:
-            #     h_drop_mask = self.h_drop_mask[:batch_size]
+            if self.h_mask_f is not None:
+                h_mask_f = self.h_mask_f[:f_batch_size]
         else:
             h_f, h_f_rest = self.h_f, None
-            # if self.h_drop_mask is not None:
-            #     h_drop_mask = self.h_drop_mask
+            if self.h_mask_f is not None:
+                h_mask_f = self.h_mask_f
+
         if self.h_b.shape[0] > b_batch_size:
             h_b, h_b_rest = F.split_axis(self.h_b, [b_batch_size], 0)
-            # if self.h_drop_mask is not None:
-            #     h_drop_mask = self.h_drop_mask[:batch_size]
+            if self.h_mask_b is not None:
+                h_mask_b = self.h_mask_b[:b_batch_size]
         else:
             h_b, h_b_rest = self.h_b, None
-            # if self.h_drop_mask is not None:
-            #     h_drop_mask = self.h_drop_mask
+            if self.h_mask_b is not None:
+                h_mask_b = self.h_mask_b
 
-        # concat W's and U's for matmul speed
-        # self.f_WU_r = ch.functions.vstack([self.f_W_r, self.f_U_r])
-        # self.f_WU_z = ch.functions.vstack([self.f_W_z, self.f_U_z])
-        # self.f_WU_h = ch.functions.vstack([self.f_W_h, self.f_U_h])
-        # self.b_WU_r = ch.functions.vstack([self.b_W_r, self.b_U_r])
-        # self.b_WU_z = ch.functions.vstack([self.b_W_z, self.b_U_z])
-        # self.b_WU_h = ch.functions.vstack([self.b_W_h, self.b_U_h])
-
-        # fwd cell
-        # if train:
-        #     self.h_f = self.h_f * self.f_rnn_drop_mask
-        # h_f = self.h_f[:f_batch_size]
-        # if train:
-        #     h_f *= self.f_rnn_drop_mask[:f_batch_size]
+        # forward cell
         xh_f = F.hstack([x_f, h_f])
         r_f = F.sigmoid(F.bias(F.matmul(xh_f, self.f_WU_r), self.f_b_r))
         z_f = F.sigmoid(F.bias(F.matmul(xh_f, self.f_WU_z), self.f_b_z))
         x_rh_f = F.hstack([x_f, r_f * h_f])
         hbar_f = F.tanh(F.bias(F.matmul(x_rh_f, self.f_WU_h), self.f_b_h))
         h_f = (1.-z_f)*h_f + z_f*hbar_f
-        # self.h_f.data[:f_batch_size] = h_f.data
 
-
-        # bkwd cell
+        # backward cell
         xh_b = F.hstack([x_b, h_b])
         r_b = F.sigmoid(F.bias(F.matmul(xh_b, self.b_WU_r), self.b_b_r))
         z_b = F.sigmoid(F.bias(F.matmul(xh_b, self.b_WU_z), self.b_b_z))
         x_rh_b = F.hstack([x_b, r_b * h_b])
         hbar_b = F.tanh(F.bias(F.matmul(x_rh_b, self.b_WU_h), self.b_b_h))
         h_b = (1.-z_b)*h_b + z_b*hbar_b
-        # if train:
-        #     self.h_b = self.h_b * self.b_rnn_drop_mask
-        # h_b = self.h_b[:b_batch_size]
-        # # if train:
-        # #     h_b *= self.b_rnn_drop_mask[:b_batch_size]
-        # xh_b = ch.functions.hstack([x_b, h_b])
-        # r_b = sigmoid(matmul(xh_b, self.b_WU_r) + bcast_to(self.b_b_r, b_state_shape))
-        # z_b = sigmoid(matmul(xh_b, self.b_WU_z) + bcast_to(self.b_b_z, b_state_shape))
-        # x_rh_b = ch.functions.hstack([x_b, r_b * h_b])
-        # hbar_b = tanh(matmul(x_rh_b, self.b_WU_h) + bcast_to(self.b_b_h, b_state_shape))
-        # h_b = (1.-z_b)*h_b + z_b*hbar_b
-        # self.h_b.data[:b_batch_size] = h_b.data
 
+        # if using horizontal dropout apply now so it's persisted
+        if train and self.h_mask_f is not None:
+            h_f *= h_mask_f
+        if train and self.h_mask_b is not None:
+            h_b *= h_mask_b
 
         # persist state
         if h_f_rest is not None:
@@ -367,4 +285,75 @@ class BidirectionalGRU(ch.Link):
         else:
             self.h_b = h_b
 
+        # apply regular dropout if not using hdropout
+        if train and self.h_mask_f is None and self.dropout:
+            h_f = F.dropout(h_f, self.dropout, train=train)
+        if train and self.h_mask_b is None and self.dropout:
+            h_b = F.dropout(h_b, self.dropout, train=train)
         return h_f, h_b
+
+class StackedGRU(ch.Chain):
+    """ Higher level GRU implementation that handles stacking, dropout,
+    horizontal dropout, bidirectionality, and operates over entire sequences.
+    """
+    def __init__(self, in_size, state_sizes,
+                 dropouts=[],
+                 hdropouts=[],
+                 bidirectional=False):
+        super(StackedGRU, self).__init__()
+        self.bidirectional = bidirectional
+        if dropouts:
+            assert len(state_sizes) == len(dropouts), "Provide per layer dropouts"
+        else:
+            dropouts = [0.0]*len(state_sizes)
+        if hdropouts:
+            assert len(state_sizes) == len(hdropouts), "Provide per layer dropouts"
+        else:
+            hdropouts = [0.0]*len(state_sizes)
+
+        gru_params = zip(state_sizes, dropouts, hdropouts)
+        prev_state_size = in_size
+        self.grus = []
+        if bidirectional:
+            for i, (state_size, drop, hdrop) in enumerate(gru_params):
+                gru = BidirectionalGRU(state_size//2,
+                                       n_inputs=prev_state_size,
+                                       dropout=drop, hdropout=hdrop)
+                self.grus.append(gru)
+                self.add_link('gru_'+str(i), gru)
+                prev_state_size = state_size
+        else:
+            for i, (state_size, drop, hdrop) in enumerate(gru_params):
+                gru = GRU(state_size,
+                          n_inputs=prev_state_size,
+                          dropout=drop, hdropout=hdrop)
+                self.grus.append(gru)
+                self.add_link('gru_'+str(i), gru)
+                prev_state_size = state_size
+
+    def __call__(self, xs, train=False):
+        """ Operates on entire sequences """
+        if self.bidirectional:
+            fowards, backwards = [], []
+            for h_f, h_b in zip(xs, xs[::-1]):
+                for gru in self.grus:
+                    h_f, h_b = gru(h_f, h_b, train=train)
+                forwards.append(h_f)
+                backwards.append(h_b)
+            return [ F.hstack([h_f, h_b]) for h_f, h_b in zip(forwards, backwards)]
+        else:
+            hs = []
+            for h in xs:
+                for gru in self.grus:
+                    h = gru(h, train=train)
+                hs.append(h)
+            return hs
+
+    def reset_state(self):
+        for gru in self.grus:
+            gru.reset_state()
+
+    def rescale_Us(self):
+        """ Rescale Us so activation are same in expectation at test time. """
+        for gru in self.grus:
+            gru.rescale_Us()

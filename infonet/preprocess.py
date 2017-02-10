@@ -1,5 +1,6 @@
 import json
 import io
+from glob import glob
 import random
 from scipy.misc import comb # to check for num relations
 
@@ -291,14 +292,24 @@ def resolve_annotations(annotations):
     return resolved_annotations
 
 def get_ace_extraction_data(count=0,
+                            splits_dir='data/ACE 2005/splits/',
+                            data_dir='data/ACE 2005/yaat/',
                             map_func_name='NoVal_BIO_map',
-                            oversample_unks=True,
-                            **kwds):
+                            train_vocab_only=False,
+                            oversample_unks=True):
     print "Loading data..."
-    # load data
-    train_data = json.loads(io.open('data/ace_05_head_yaat_train.json', 'r').read())
-    dev_data = json.loads(io.open('data/ace_05_head_yaat_dev.json', 'r').read())
-    test_data = json.loads(io.open('data/ace_05_head_yaat_test.json', 'r').read())
+    if not splits_dir.endswith('/'): splits_dir += '/'
+    if not data_dir.endswith('/'): data_dir += '/'
+    train_set = set(open(splits_dir+'train.txt', 'r').read().split())
+    dev_set = set(open(splits_dir+'dev.txt', 'r').read().split())
+    test_set = set(open(splits_dir+'test.txt', 'r').read().split())
+
+    train_docs = [json.loads(io.open(data_dir+f+'.yaat', 'r').read()) for f in train_set]
+    dev_docs = [json.loads(io.open(data_dir+f+'.yaat', 'r').read()) for f in dev_set]
+    test_docs = [json.loads(io.open(data_dir+f+'.yaat', 'r').read()) for f in test_set]
+    # train_data = json.loads(io.open('data/ace_05_head_yaat_train.json', 'r').read())
+    # dev_data = json.loads(io.open('data/ace_05_head_yaat_dev.json', 'r').read())
+    # test_data = json.loads(io.open('data/ace_05_head_yaat_test.json', 'r').read())
     # all_data_values = train_data.values() + dev_data.values() + test_data.values()
 
     # get vocabs and generate info network annotations
@@ -307,11 +318,12 @@ def get_ace_extraction_data(count=0,
     boundary_vocab = Vocab(min_count=0)
     mention_vocab = Vocab(min_count=0)
     relation_vocab = Vocab(min_count=0)
-    for dataset_i, docs in enumerate([train_data.values(), dev_data.values(), test_data.values()]):
+    for dataset_i, docs in enumerate([train_docs, dev_docs, test_docs]):
         for doc in docs:
-            if dataset_i ==0: #< 2: # use only train data to estimate vocabs
+            if train_vocab_only and dataset_i ==0:
                 token_vocab.add(doc['tokens'])
-
+            else:
+                token_vocab.add(doc['tokens'])
             pos_vocab.add(doc['pos'])
 
             # dedupe and remove nestings/overlaps
@@ -358,21 +370,21 @@ def get_ace_extraction_data(count=0,
     tag_map = compute_tag_map(boundary_vocab)
 
     # create datasets
-    x_train = [ doc['tokens'] for doc in train_data.values() ]
-    x_dev = [ doc['tokens'] for doc in dev_data.values() ]
-    x_test = [ doc['tokens'] for doc in test_data.values() ]
-    p_train = [ doc['pos'] for doc in train_data.values() ]
-    p_dev = [ doc['pos'] for doc in dev_data.values() ]
-    p_test = [ doc['pos'] for doc in test_data.values() ]
-    b_train = [ doc['boundary_labels'] for doc in train_data.values() ]
-    b_dev = [ doc['boundary_labels'] for doc in dev_data.values() ]
-    b_test = [ doc['boundary_labels'] for doc in test_data.values() ]
-    m_train = [ doc['mentions'] for doc in train_data.values() ]
-    m_dev = [ doc['mentions'] for doc in dev_data.values() ]
-    m_test = [ doc['mentions'] for doc in test_data.values() ]
-    r_train = [ doc['relations'] for doc in train_data.values() ]
-    r_dev = [ doc['relations'] for doc in dev_data.values() ]
-    r_test = [ doc['relations'] for doc in test_data.values() ]
+    x_train = [ doc['tokens'] for doc in train_docs ]
+    x_dev = [ doc['tokens'] for doc in dev_docs ]
+    x_test = [ doc['tokens'] for doc in test_docs ]
+    p_train = [ doc['pos'] for doc in train_docs ]
+    p_dev = [ doc['pos'] for doc in dev_docs ]
+    p_test = [ doc['pos'] for doc in test_docs ]
+    b_train = [ doc['boundary_labels'] for doc in train_docs ]
+    b_dev = [ doc['boundary_labels'] for doc in dev_docs ]
+    b_test = [ doc['boundary_labels'] for doc in test_docs ]
+    m_train = [ doc['mentions'] for doc in train_docs ]
+    m_dev = [ doc['mentions'] for doc in dev_docs ]
+    m_test = [ doc['mentions'] for doc in test_docs ]
+    r_train = [ doc['relations'] for doc in train_docs ]
+    r_dev = [ doc['relations'] for doc in dev_docs ]
+    r_test = [ doc['relations'] for doc in test_docs ]
 
     # before converting drop infrequents
     token_vocab.drop_infrequent()
@@ -407,11 +419,11 @@ def get_ace_extraction_data(count=0,
     #     for t in s:
     #         print '\t  {}'.format(t)
     #
-    # print "Mention subtypes to relations:"
-    # for m, s in msubtype2rtype.items():
-    #     print '\t{}:'.format(m)
-    #     for t, v in s.items():
-    #         print '\t  {}:: {}'.format(t, v)
+    print "Mention subtypes to relations:"
+    for m, s in msubtype2rtype.items():
+        print '\t{}:'.format(m)
+        for t, v in s.items():
+            print '\t  {}:: {}'.format(t, v)
 
     # convert to indices in vocab
     ix_train = convert_sequences(x_train, token_vocab.idx)
@@ -443,7 +455,7 @@ def get_ace_extraction_data(count=0,
             train_unks_ratio*100, dev_unks_ratio*100)
         for i in range(len(ix_train)):
             for j in range(len(ix_train[i])):
-                if random.uniform(0,1) < dev_unks_ratio:
+                if random.uniform(0,1) < dev_unks_ratio-train_unks_ratio:
                     ix_train[i][j] = token_vocab.iunk
 
         x_t = [token_vocab.token(i) for xs in ix_train for i in xs]

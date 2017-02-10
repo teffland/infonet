@@ -3,6 +3,9 @@ import io
 import time
 import os
 import argparse
+import yaml
+from datetime import datetime
+
 import numpy as np
 import numpy.random as npr
 import chainer as ch
@@ -16,35 +19,37 @@ from infonet.tagger import Tagger, TaggerLoss
 from infonet.evaluation import mention_boundary_stats
 from infonet.word_vectors import get_pretrained_vectors
 
-def dump_stats(STATS, model_name):
-    print "Dumping stats for {}...".format(model_name),
+def dump_stats(STATS, save_prefix):
+    print "Dumping stats for {}...".format(save_prefix),
     # write out stats that how to configure (instantiate) a model
     stats = {k:v for k,v in STATS.items()
              if k in ('args', 'model_name')}
-    with open('experiments/{}_config.json'.format(model_name), 'w') as f:
+    with open(save_prefix+'_config.json', 'w') as f:
         f.write(json.dumps(stats)+'\n')
     # write out stats that involve evaluation of model
     stats = {k:v for k,v in STATS.items()
              if 'stats' in k}
-    with open('experiments/{}_eval_stats.json'.format(model_name), 'a') as f:
+    with open(save_prefix+'_eval_stats.json', 'a') as f:
         f.write(json.dumps(stats)+'\n')
     # write out stats that are monitored model statistics
     stats = {k:v for k,v in STATS.items()
              if 'stats' not in k}
-    with open('experiments/{}_report_stats.json'.format(model_name), 'a') as f:
+    with open(save_prefix+'_report_stats.json', 'a') as f:
         f.write(json.dumps(stats)+'\n')
     print "Done"
 
-def train(dataset, STATS, model_name,
-          batch_size, n_epoch, wait,
-          embedding_size, lstm_size, learning_rate,
-          crf_type, dropout, pos_d,
-          weight_decay, grad_clip,
-          bidirectional, use_mlp,
-          n_layers, use_hdropout,
-          w2v_fname='',
-          eval_only=False,
-          **kwds):
+def train(dataset, config, save_prefix, eval_only=False):
+        #   STATS, model_name,
+        #   batch_size, n_epoch, wait,
+        #   embedding_size, lstm_size, learning_rate,
+        #   crf_type, dropout, pos_d,
+        #   weight_decay, grad_clip,
+        #   bidirectional, use_mlp,
+        #   n_layers, use_hdropout,
+        #   w2v_fname='',
+        #   eval_only=False,
+        #   **kwds):
+    STATS = {'args':{}}
     # unpack dataset
     token_vocab = dataset['token_vocab']
     pos_vocab = dataset['pos_vocab']
@@ -78,41 +83,46 @@ def train(dataset, STATS, model_name,
 
     print tag_map
     print len(tag_map['tag2mtype']), ' output labels'
-    train_iter = SequenceIterator(zip(ix_train, ip_train, ib_train, im_train), batch_size, repeat=True)
-    dev_iter = SequenceIterator(zip(ix_dev, ip_dev, ib_dev, im_dev), batch_size, repeat=True)
-    test_iter = SequenceIterator(zip(ix_test, ip_test, ib_test, im_test), batch_size, repeat=True)
+    train_iter = SequenceIterator(zip(ix_train, ip_train, ib_train, im_train),
+                                  config['train']['batch_size'], repeat=True)
+    dev_iter = SequenceIterator(zip(ix_dev, ip_dev, ib_dev, im_dev),
+                                config['train']['batch_size'], repeat=True)
+    test_iter = SequenceIterator(zip(ix_test, ip_test, ib_test, im_test),
+                                 config['train']['batch_size'], repeat=True)
 
     # get pretrained vectors
-    if w2v_fname:
+    w2v = config['tagger']['word_vector_size']
+    if type(w2v) is str:
         print "Loading pretrained embeddings...",
-        trim_fname = '/'.join(w2v_fname.split('/')[:-1]+['trimmed_'+w2v_fname.split('/')[-1]])
+        trim_fname = '/'.join(w2v.split('/')[:-1]+['trimmed_'+w2v.split('/')[-1]])
         if os.path.isfile(trim_fname):
             print "Already trimmed..."
             embeddings = get_pretrained_vectors(token_vocab, trim_fname, trim=False)
         else:
             print "Trimming..."
-            embeddings = get_pretrained_vectors(token_vocab, w2v_fname, trim=True)
+            embeddings = get_pretrained_vectors(token_vocab, w2v, trim=True)
         embedding_size = embeddings.shape[1]
         STATS['args']['embedding_size'] = embedding_size
         print "Embedding size overwritten to {}".format(embedding_size)
     else:
-        embeddings = npr.normal(size=(token_vocab.v, embedding_size))
+        embeddings = npr.normal(size=(token_vocab.v, w2v))
 
     # model
-    tagger = Tagger(embeddings, lstm_size, boundary_vocab.v,
-                    pos_d=pos_d, pos_v=pos_vocab.v,
-                    crf_type=crf_type,
-                    dropout=dropout,
-                    bidirectional=bidirectional,
-                    use_hdropout=use_hdropout,
-                    use_mlp=use_mlp,
-                    n_layers=n_layers)
+    tagger = Tagger(embeddings, boundary_vocab.v,
+                    **config['tagger'])
     model_loss = TaggerLoss(tagger)
 
-    optimizer = ch.optimizers.Adam(learning_rate)
+    optimizer = getattr(ch.optimizers, config['optimizer']['type'])(
+        config['optimizer']['learning_rate'])
     optimizer.setup(model_loss)
-    optimizer.add_hook(ch.optimizer.WeightDecay(weight_decay))
-    optimizer.add_hook(ch.optimizer.GradientClipping(grad_clip))
+
+    # extra optimizer config
+    decay = config['optimizer']['learning_rate']
+    if decay:
+        optimizer.add_hook(ch.optimizer.WeightDecay(decay))
+    grad_clip_val = config['optimizer']['grad_clip']
+    if grad_clip_val:
+        optimizer.add_hook(ch.optimizer.GradientHardClipping(-grad_clip_val, grad_clip_val))
     print "Done"
 
     # evalutation subroutine
@@ -171,6 +181,7 @@ def train(dataset, STATS, model_name,
                         name, t, s=s)
 
     if not eval_only:
+        # npr.seed(config['train']['rseed'])
         # training
         best_dev_f1 = 0
         n_dev_down = 0
@@ -226,16 +237,16 @@ def train(dataset, STATS, model_name,
                     best_dev_f1 = dev_f1
                     n_dev_down = 0
                     print "Saving model...",
-                    ch.serializers.save_npz('experiments/'+model_name+'.model', tagger)
+                    ch.serializers.save_npz(save_prefix+'.model', tagger)
                     print "Done"
                 else:
                     n_dev_down += 1
-                    if n_dev_down > wait:
+                    if n_dev_down > config['train']['patience']:
                         print "Stopping early"
                         break
-                if train_iter.epoch == n_epoch:
+                if train_iter.epoch == config['train']['n_epoch']:
                     break
-                dump_stats(STATS, model_name)
+                dump_stats(STATS, save_prefix)
                 STATS = reset_stats(STATS)
 
 
@@ -246,7 +257,7 @@ def train(dataset, STATS, model_name,
 
     # restore and evaluate
     print 'Restoring best model...',
-    ch.serializers.load_npz('experiments/'+model_name+'.model', tagger)
+    ch.serializers.load_npz(save_prefix+'.model', tagger)
     print 'Done'
 
     print 'Evaluating...'
@@ -271,88 +282,96 @@ def train(dataset, STATS, model_name,
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('-c', '--count',
-                        default=0,
-                        help='Minimum number of token count to not be UNK',
-                        type=int)
-    parser.add_argument('-b', '--batch_size',
-                        default=256,
-                        help='Number of docs per minibatch',
-                        type=int)
-    parser.add_argument('-n', '--n_epoch',
-                        default=50,
-                        help='Max number of epochs to train',
-                        type=int)
-    parser.add_argument('-d', '--embedding_size',
-                        default=50,
-                        help='Size of token embeddings',
-                        type=int)
-    parser.add_argument('-p', '--pos_d',
-                        default=25,
-                        help='Size of POS embeddings',
-                        type=int)
-    parser.add_argument('--w2v_fname', type=str, default='',
-                        help='Location of word vectors file')
-    parser.add_argument('-l', '--learning_rate',
-                        default=.01,
-                        help='Learning rate of Adam optimizer',
-                        type=float)
-    parser.add_argument('-w', '--wait',
-                        default=20,
-                        help='Number of epochs to wait for early stopping')
-    parser.add_argument('--dropout',
-                        default=.25,
-                        type=float)
-    parser.add_argument('--lstm_size',
-                        default=50,
-                        type=int)
-    parser.add_argument('--n_layers',
-                        default=1,
-                        type=int)
-    parser.add_argument('--bidirectional', action='store_true', default=False)
-    parser.add_argument('--use_mlp', action='store_true', default=False)
-    parser.add_argument('--use_hdropout', action='store_true', default=False)
-    parser.add_argument('--weight_decay',
-                        default=.0001,
-                        type=float)
-    parser.add_argument('--grad_clip',
-                        default=50.,
-                        type=float)
-    parser.add_argument('--crf_type', type=str, default='none',
-                        help='Choose from none, simple, linear, simple_bilinear, and bilinear')
+    parser.add_argument('config_file', help='YAML file containing configuration')
     parser.add_argument('--eval_only', action='store_true', default=False)
-    parser.add_argument('--rseed', type=int, default=42,
-                        help='Sets the random seed')
-    parser.add_argument('--model_f', type=str, default='',
-                        help='Overrides name of the model output files')
-    parser.add_argument('--map_func_name', type=str, default='E_BIO_map',
-                        choices=['NoVal_BIO_map',
-                                 'E_BIO_map', 'E_typed_BIO_map',
-                                 'Entity_BIO_map', 'Entity_typed_BIO_map'])
+    # parser.add_argument('-c', '--count',
+    #                     default=0,
+    #                     help='Minimum number of token count to not be UNK',
+    #                     type=int)
+    # parser.add_argument('-b', '--batch_size',
+    #                     default=256,
+    #                     help='Number of docs per minibatch',
+    #                     type=int)
+    # parser.add_argument('-n', '--n_epoch',
+    #                     default=50,
+    #                     help='Max number of epochs to train',
+    #                     type=int)
+    # parser.add_argument('-d', '--embedding_size',
+    #                     default=50,
+    #                     help='Size of token embeddings',
+    #                     type=int)
+    # parser.add_argument('-p', '--pos_d',
+    #                     default=25,
+    #                     help='Size of POS embeddings',
+    #                     type=int)
+    # parser.add_argument('--w2v_fname', type=str, default='',
+    #                     help='Location of word vectors file')
+    # parser.add_argument('-l', '--learning_rate',
+    #                     default=.01,
+    #                     help='Learning rate of Adam optimizer',
+    #                     type=float)
+    # parser.add_argument('-w', '--wait',
+    #                     default=20,
+    #                     help='Number of epochs to wait for early stopping')
+    # parser.add_argument('--dropout',
+    #                     default=.25,
+    #                     type=float)
+    # parser.add_argument('--lstm_size',
+    #                     default=50,
+    #                     type=int)
+    # parser.add_argument('--n_layers',
+    #                     default=1,
+    #                     type=int)
+    # parser.add_argument('--bidirectional', action='store_true', default=False)
+    # parser.add_argument('--use_mlp', action='store_true', default=False)
+    # parser.add_argument('--use_hdropout', action='store_true', default=False)
+    # parser.add_argument('--weight_decay',
+    #                     default=.0001,
+    #                     type=float)
+    # parser.add_argument('--grad_clip',
+    #                     default=50.,
+    #                     type=float)
+    # parser.add_argument('--crf_type', type=str, default='none',
+    #                     help='Choose from none, simple, linear, simple_bilinear, and bilinear')
+    # parser.add_argument('--eval_only', action='store_true', default=False)
+    # parser.add_argument('--rseed', type=int, default=42,
+    #                     help='Sets the random seed')
+    # parser.add_argument('--model_f', type=str, default='',
+    #                     help='Overrides name of the model output files')
+    # parser.add_argument('--map_func_name', type=str, default='E_BIO_map',
+    #                     choices=['NoVal_BIO_map',
+    #                              'E_BIO_map', 'E_typed_BIO_map',
+    #                              'Entity_BIO_map', 'Entity_typed_BIO_map',
+    #                              'Entity_BILOU_map', 'Entity_typed_BILOU_map'])
     return parser.parse_args()
 
-def name_tagger(args):
-    w2v = args.w2v_fname.split('/')[-1] if args.w2v_fname else ''
-    bi = 'bi' if args.bidirectional else ''
-    model_name = 'tagger_{bi}_{a.embedding_size}_{a.lstm_size}_{a.crf_type}_{a.dropout}_\
-{a.n_epoch}_{a.batch_size}_{a.weight_decay}_{a.count}_{w2v}'.format(a=args, w2v=w2v, bi=bi)
-    return model_name
+# def name_tagger(args):
+#     w2v = args.w2v_fname.split('/')[-1] if args.w2v_fname else ''
+#     bi = 'bi' if args.bidirectional else ''
+#     model_name = 'tagger_{bi}_{a.embedding_size}_{a.lstm_size}_{a.crf_type}_{a.dropout}_\
+# {a.n_epoch}_{a.batch_size}_{a.weight_decay}_{a.count}_{w2v}'.format(a=args, w2v=w2v, bi=bi)
+#     return model_name
 
 if __name__ == '__main__':
     # read input args
     args = parse_args()
-    npr.seed(args.rseed)
-    arg_dict = vars(args)
+    config = yaml.load(open(args.config_file))
+    npr.seed(config['random_seed'])
+    # arg_dict = vars(args)
 
     # setup stats and model name
-    if args.model_f:
-        model_name = args.model_f
-    else:
-        model_name = name_tagger(args)
-    STATS = {'args': arg_dict,
-             'model_name':model_name,
-             'start_time':time.time()}
+    # if args.model_f:
+    #     model_name = args.model_f
+    # else:
+    #     model_name = name_tagger(args)
+    # STATS = {'args': arg_dict,
+    #          'model_name':model_name,
+    #          'start_time':time.time()}
+    tagger_name = 'tagger_'+datetime.strftime(datetime.now(), '%b-%m-%Y-%H:%M:%S')
+    save_prefix = config['experiment_dir']+tagger_name
+    if not os.path.exists(save_prefix):
+        os.makedirs(save_prefix)
 
     # run it
-    dataset = get_ace_extraction_data(**arg_dict)
-    train(dataset, STATS=STATS, model_name=model_name, **arg_dict)
+    dataset = get_ace_extraction_data(**config['preprocess'])
+    train(dataset, config, save_prefix, eval_only=args.eval_only)

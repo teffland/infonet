@@ -2,141 +2,223 @@ import numpy as np
 import chainer as ch
 import chainer.functions as F
 import chainer.links as L
+
 from util import SequenceIterator, sequences2arrays
 from crf_linear import LinearChainCRF
-from gru import GRU, BidirectionalGRU
-
-# import monitor
+from gru import StackedGRU
 
 class Tagger(ch.Chain):
-    def __init__(self, embeddings, lstm_size, out_size,
-                 pos_d, pos_v,
+    def __init__(self,
+                 word_embeddings,
+                 n_label,
+                 backprop_to_embeds=False,
+                 word_dropout=.5,
+                 pos_vocab_size=0,
+                 pos_vector_size=25,
+                 pos_dropout=.5,
+                 gru_state_sizes=[100],
                  bidirectional=False,
-                 use_mlp=False,
-                 dropout=.25,
-                 use_hdropout=False,
-                 n_layers=1,
-                 crf_type='none'):
-        # setup rnn layer
-        hdropout = dropout if use_hdropout else 0.0
-        if bidirectional:
-            feature_size = 2*lstm_size
-            lstms = [BidirectionalGRU(lstm_size, n_inputs=embeddings.shape[1]+pos_d,
-                                      dropout=hdropout)]
-            for i in range(1,n_layers):
-                lstms.append(BidirectionalGRU(lstm_size, n_inputs=feature_size, dropout=hdropout))
+                 gru_dropouts=[.5],
+                 gru_hdropouts=[.0],
+                 mlp_sizes=[],
+                 mlp_activations=[],
+                 mlp_dropouts=[],
+                 crf_type=None,
+                 **kwds):
+                # lstm_size, out_size,
+                #  pos_d, pos_v,
+                #  bidirectional=False,
+                #  use_mlp=False,
+                #  dropout=.25,
+                #  use_hdropout=False,
+                #  n_layers=1,101693
+
+                #  crf_type='none'):
+        super(Tagger, self).__init__()
+
+        # embeddings
+        self.word_size = word_embeddings.shape[1]
+        word_embed = L.EmbedID(word_embeddings.shape[0], word_embeddings.shape[1],
+                          word_embeddings)
+        self.add_link('word_embed', word_embed)
+        self.word_dropout = word_dropout
+        if pos_vocab_size:
+            self.use_pos = True
+            self.pos_size = pos_vector_size
+            pos_embed = L.EmbedID(pos_vocab_size, pos_vector_size)
+            self.add_link('pos_embed', pos_embed)
+            self.pos_dropout = pos_dropout
         else:
-            feature_size = lstm_size
-            lstms = [GRU(lstm_size, n_inputs=embeddings.shape[1]+pos_d, dropout=hdropout)]
-            for i in range(1,n_layers):
-                lstms.append(GRU(lstm_size, n_inputs=feature_size, dropout=hdropout))
+            self.use_pos = False
+
+        # gru layers
+        in_size = self.word_size + self.pos_size if self.use_pos else self.word_size
+        gru = StackedGRU(in_size, gru_state_sizes,
+                         dropouts=gru_dropouts,
+                         hdropouts=gru_hdropouts)
+        self.add_link('gru', gru)
+        out_size = gru_state_sizes[-1]
+
+        # mlp layers
+        self.mlp_dropouts = mlp_dropouts
+        self.activations = [ getattr(F, f) for f in mlp_activations ]
+        self.mlps = []
+        for i, hidden_dim in enumerate(mlp_sizes):
+            mlp = L.Linear(out_size, hidden_dim)
+            self.mlps.append(mlp)
+            self.add_link('mlp_'+i, mlp)
+            out_size = hidden_dim
+
+        # crf layer
+        self.crf_type = crf_type if crf_type.lower() != 'none' else None
+        if self.crf_type:
+            crf = LinearChainCRF(out_size, n_label, self.crf_type)
+            self.add_link('crf', crf)
+        else:
+            logit = L.Linear(out_size, n_label)
+            self.add_link('logit', logit)
+
+        # # setup rnn layer
+        # hdropout = dropout if use_hdropout else 0.0
+        # if bidirectional:
+        #     feature_size = 2*lstm_size
+        #     lstms = [BidirectionalGRU(lstm_size, n_inputs=embeddings.shape[1]+pos_d,
+        #                               dropout=hdropout)]
+        #     for i in range(1,n_layers):
+        #         lstms.append(BidirectionalGRU(lstm_size, n_inputs=feature_size, dropout=hdropout))
+        # else:
+        #     feature_size = lstm_size
+        #     lstms = [GRU(lstm_size, n_inputs=embeddings.shape[1]+pos_d, dropout=hdropout)]
+        #     for i in range(1,n_layers):
+        #         lstms.append(GRU(lstm_size, n_inputs=feature_size, dropout=hdropout))
 
         # setup crf layer
-        if crf_type in 'none':
-            self.crf_type = None
-            crf_type = 'simple' # it won't actually be used
-        else:
-            self.crf_type = crf_type
-
-        super(Tagger, self).__init__(
-            embed = L.EmbedID(embeddings.shape[0], embeddings.shape[1],
-                              embeddings),
-            pos_embed = L.EmbedID(pos_v, pos_d),
-            mlp = L.Linear(feature_size, feature_size),
-            out = L.Linear(feature_size, feature_size),
-            logit = L.Linear(feature_size, out_size),
-            crf = LinearChainCRF(out_size, feature_size, crf_type)
-        )
-        self.lstms = lstms
-        for i, lstm in enumerate(self.lstms):
-            self.add_link('lstm_{}'.format(i), lstm)
-        self.embedding_size = embeddings.shape[1]
-        self.pos_d = pos_d
-        self.lstm_size = lstm_size
-        self.feature_size = feature_size
-        self.out_size = out_size
-        self.dropout = dropout
-        self.bidirectional = bidirectional
-        self.use_mlp = use_mlp
-        self.use_hdropout = use_hdropout
+        # if crf_type in 'none':
+        #     self.crf_type = None
+        #     crf_type = 'simple' # it won't actually be used
+        # else:
+        #     self.crf_type = crf_type
+        #
+        # super(Tagger, self).__init__(
+        #     embed = L.EmbedID(embeddings.shape[0], embeddings.shape[1],
+        #                       embeddings),
+        #     pos_embed = L.EmbedID(pos_v, pos_d),
+        #     mlp = L.Linear(feature_size, feature_size),
+        #     out = L.Linear(feature_size, feature_size),
+        #     logit = L.Linear(feature_size, out_size),
+        #     crf = LinearChainCRF(out_size, feature_size, crf_type)
+        # )
+        # self.lstms = lstms
+        # for i, lstm in enumerate(self.lstms):
+        #     self.add_link('lstm_{}'.format(i), lstm)
+        # self.embedding_size = embeddings.shape[1]
+        # self.pos_d = pos_d
+        # self.lstm_size = lstm_size
+        # self.feature_size = feature_size
+        # self.out_size = out_size
+        # self.dropout = dropout
+        # self.bidirectional = bidirectional
+        # self.use_mlp = use_mlp
+        # self.use_hdropout = use_hdropout
 
     def reset_state(self):
-        for lstm in self.lstms:
-            lstm.reset_state()
+        self.gru.reset_state()
 
-    def __call__(self, x_list, p_list, train=True, return_logits=False):
-        drop = F.dropout
-        embeds = [ drop(self.embed(x), self.dropout, train) for x in x_list ]
-        if self.pos_d > 0:
-            pos_embeds = [ drop(self.pos_embed(p), self.dropout, train) for p in p_list ]
-            self.embeds = [F.hstack([x,p]) for x,p in zip(embeds, pos_embeds)]
-        else:
-            self.embeds = embeds
+    def rescale_Us(self):
+        self.gru.rescale_Us
 
-        # run lstm layer over embeddings
-        if self.bidirectional:
-            # helper function
-            def bilstm(inputs, lstm):
-                f_lstms, b_lstms = [], []
-                for x_f, x_b in zip(inputs, inputs[::-1]):
-                    h_f, h_b = lstm(x_f, x_b, train=train)
-                    f_lstms.append(h_f)
-                    b_lstms.append(h_b)
-                b_lstms = b_lstms[::-1]
-                return [ F.hstack([f,b]) for f,b in zip(f_lstms, b_lstms) ]
+    def __call__(self, x_list, p_list, train=True):#, return_logits=False):
+        # embed the tokens and pos
+        self.embeds = [ F.dropout(self.word_embed(x), self.word_dropout, train)
+                   for x in x_list ]
+        if self.use_pos:
+            pos_embeds = [ F.dropout(self.pos_embed(p), self.pos_dropout, train)
+                           for p in p_list ]
+            self.embeds = [ F.hstack([x,p]) for x,p in zip(self.embeds, pos_embeds)]
 
-            # run the layers of bilstms
-            # don't dropout h twice if using horizontal dropout
-            if self.use_hdropout:
-                lstms = [ h for h in bilstm(self.embeds, self.lstms[0]) ]
-                for lstm in self.lstms[1:]:
-                    lstms = [ h for h in bilstm(lstms, lstm) ]
-            else:
-                lstms = [ drop(h, self.dropout, train) for h in bilstm(self.embeds, self.lstms[0]) ]
-                for lstm in self.lstms[1:]:
-                    lstms = [ drop(h, self.dropout, train) for h in bilstm(lstms, lstm) ]
-        else:
-            if self.use_hdropout:
-                # lstms = []
-                # for i, x in enumerate(self.embeds):
-                #     print i
-                #     lstms.append(drop(self.lstms[0](x), self.dropout, train))
-                # print
-                lstms = [ drop(self.lstms[0](x), self.dropout, train) for x in self.embeds ]
-                for lstm in self.lstms[1:]:
-                    lstms = [ lstm(h, train=train) for h in lstms ]
-            else:
-                lstms = [ drop(self.lstms[0](x, train=train), self.dropout, train) for x in self.embeds ]
-                for lstm in self.lstms[1:]:
-                    lstms = [ drop(lstm(h, train=train), self.dropout, train) for h in lstms ]
+        # run gru over them
+        features = self.gru(self.embeds, train=train)
+
+        # run mlp over features
+        for dropout, activation, mlp in zip(self.mlp_dropouts, self.activations, self.mlps):
+            for i in range(len(features)):
+                features[i] = F.dropout(activation(mlp(features[i])), dropout, train=train)
+
+        return features
 
 
-        f = F.leaky_relu
-        # rnn output layer
-        lstms = [ drop(f(self.out(h)), self.dropout, train) for h in lstms]
 
-        # hidden layer
-        if self.use_mlp:
-            lstms = [ drop(f(self.mlp(h)) , self.dropout, train) for h in lstms ]
+        # drop = F.dropout
+        # embeds = [ drop(self.embed(x), self.dropout, train) for x in x_list ]
+        # if self.pos_d > 0:
+        #     pos_embeds = [ drop(self.pos_embed(p), self.dropout, train) for p in p_list ]
+        #     self.embeds = [F.hstack([x,p]) for x,p in zip(embeds, pos_embeds)]
+        # else:
+        #     self.embeds = embeds
+        #
+        # # run lstm layer over embeddings
+        # if self.bidirectional:
+        #     # helper function
+        #     def bilstm(inputs, lstm):
+        #         f_lstms, b_lstms = [], []
+        #         for x_f, x_b in zip(inputs, inputs[::-1]):
+        #             h_f, h_b = lstm(x_f, x_b, train=train)
+        #             f_lstms.append(h_f)
+        #             b_lstms.append(h_b)
+        #         b_lstms = b_lstms[::-1]
+        #         return [ F.hstack([f,b]) for f,b in zip(f_lstms, b_lstms) ]
+        #
+        #     # run the layers of bilstms
+        #     # don't dropout h twice if using horizontal dropout
+        #     if self.use_hdropout:
+        #         lstms = [ h for h in bilstm(self.embeds, self.lstms[0]) ]
+        #         for lstm in self.lstms[1:]:
+        #             lstms = [ h for h in bilstm(lstms, lstm) ]
+        #     else:
+        #         lstms = [ drop(h, self.dropout, train) for h in bilstm(self.embeds, self.lstms[0]) ]
+        #         for lstm in self.lstms[1:]:
+        #             lstms = [ drop(h, self.dropout, train) for h in bilstm(lstms, lstm) ]
+        # else:
+        #     if self.use_hdropout:
+        #         # lstms = []
+        #         # for i, x in enumerate(self.embeds):
+        #         #     print i
+        #         #     lstms.append(drop(self.lstms[0](x), self.dropout, train))
+        #         # print
+        #         lstms = [ drop(self.lstms[0](x), self.dropout, train) for x in self.embeds ]
+        #         for lstm in self.lstms[1:]:
+        #             lstms = [ lstm(h, train=train) for h in lstms ]
+        #     else:
+        #         lstms = [ drop(self.lstms[0](x, train=train), self.dropout, train) for x in self.embeds ]
+        #         for lstm in self.lstms[1:]:
+        #             lstms = [ drop(lstm(h, train=train), self.dropout, train) for h in lstms ]
+        #
+        #
+        # f = F.leaky_relu
+        # # rnn output layer
+        # lstms = [ drop(f(self.out(h)), self.dropout, train) for h in lstms]
+        #
+        # # hidden layer
+        # if self.use_mlp:
+        #     lstms = [ drop(f(self.mlp(h)) , self.dropout, train) for h in lstms ]
+        #
+        # if return_logits: # no crf layer, so do simple logit layer
+        #     return [ self.logit(h) for h in lstms ]
+        # else:
+        #     return lstms
 
-        if return_logits: # no crf layer, so do simple logit layer
-            return [ self.logit(h) for h in lstms ]
-        else:
-            return lstms
-
-    def predict(self, x_list, p_list, reset=True, return_features=False, train=False, **kwds):
+    def predict(self, x_list, p_list,
+                reset=True, train=False, **kwds):
         if reset:
             self.reset_state()
+
+        self.features = self(x_list, p_list, train=train)
         if self.crf_type:
-            features = self(x_list, p_list, train=train, return_logits=False)
-            _, preds = self.crf.argmax(features)
+            _, preds = self.crf.argmax(self.features)
         else:
-            features = self(x_list, p_list, train=train, return_logits=True)
-            preds = [ ch.functions.argmax(logit, axis=1) for logit in features ]
-        if return_features:
-            return preds, features
-        else:
-            return preds
+            preds = [ ch.functions.argmax(self.logit(feature), axis=1)
+                      for feature in self.features ]
+        return preds
 
     def report(self):
         summary = {}
@@ -149,26 +231,24 @@ class Tagger(ch.Chain):
         return summary
 
 class TaggerLoss(ch.Chain):
-    def __init__(self, tagger,
-                 loss_func=ch.functions.softmax_cross_entropy):
+    def __init__(self, tagger):
         super(TaggerLoss, self).__init__(
-            tagger = tagger
+            tagger=tagger
         )
-        self.loss_func = loss_func
 
     def __call__(self, x_list, p_list, b_list, features=None):
-        # inputting features skips evaluation of the network
+        # inputing features skips evaluation of the network
         if self.tagger.crf_type:
             if features is None:
-                features = self.tagger(x_list, p_list)
+                features = self.tagger(x_list, p_list, train=True)
             return self.tagger.crf(features, b_list)
 
-        elif self.loss_func == ch.functions.softmax_cross_entropy:
+        else:
             loss = 0
             if features is None:
-                features = self.tagger(x_list, p_list, return_logits=True)
-            for logit, b in zip(features, b_list):
-                loss += self.loss_func(logit, b)
+                features = self.tagger(x_list, p_list, train=True)
+            for feature, b in zip(features, b_list):
+                loss += F.softmax_cross_entropy(self.tagger.logit(feature), b)
             return loss / float(len(b_list))
 
     def report(self):
@@ -189,7 +269,7 @@ def extract_mentions(seq,
                      in_tags,#=('B', 'I', 'L', 'U'),
                      out_tags,#=('O'),
                      tag2mtype=None):
-    """ We extract mentions approximately according to the BIO or BILOU schemes
+    """ We extract mentions according to the BIO or BILOU schemes
 
     We scan across the sequence, encountering 3 cases:
     1. We are not in a mention, but encounter an in_tag, and start a mention

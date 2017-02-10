@@ -54,14 +54,14 @@ class LinearChainCRF(link.Link):
         cost (~chainer.Variable): Transition cost parameter.
     """
 
-    def __init__(self, n_label, n_feature, param_type='simple'):
-        if param_type == 'simple':
+    def __init__(self, n_feature, n_label, factor_type='simple'):
+        if factor_type == 'simple':
             trans_cost_shape = (n_label, n_label)
-        elif param_type == 'linear':
+        elif factor_type == 'linear':
             trans_cost_shape = (2*n_feature, n_label**2)
-        elif param_type == 'simple_bilinear':
+        elif factor_type == 'simple_bilinear':
             trans_cost_shape = (n_feature, n_label**2)
-        elif param_type == 'bilinear':
+        elif factor_type == 'bilinear':
             trans_cost_shape = (n_feature, n_feature, n_label**2)
         else:
             raise ValueError, "Invalid param_type argument."
@@ -75,12 +75,12 @@ class LinearChainCRF(link.Link):
         self.trans_bias.data[...] = 0
         self.uni_cost.data[...] = npr.uniform(size=self.uni_cost.data.shape)
         self.uni_bias.data[...] = 0
-        self.param_type = param_type
+        self.factor_type = factor_type
         self.n_label = n_label
         self.n_feature = n_feature
 
     def calc_trans_cost(self, xs):
-        if self.param_type == 'simple':
+        if self.factor_type == 'simple':
             return [ self.trans_cost for _ in range(len(xs)-1) ]
         else: # all other are input-specific
             costs = []
@@ -89,14 +89,14 @@ class LinearChainCRF(link.Link):
                 if xj.shape[0] < xi.shape[0]:
                     # alpha, alpha_rest = split_axis.split_axis(alpha, [batch], axis=0)
                     xi, _ = F.split_axis(xi, [xj.shape[0]], axis=0)
-                if self.param_type == 'linear':
+                if self.factor_type == 'linear':
                     x = F.hstack([xi,xj])
                     f = F.matmul(x, self.trans_cost)
-                elif self.param_type == 'simple_bilinear':
+                elif self.factor_type == 'simple_bilinear':
                     x = xi * xj # elementwise product, dotted with trans costs
                     f = F.matmul(x, self.trans_cost)
                     print f.shape
-                elif self.param_type == 'bilinear':
+                elif self.factor_type == 'bilinear':
                     # bilinear is x1^T A_c x2 for each c in labels
                     b_xi = F.broadcast_to(xi, (self.n_label**2,)+xi.shape)
                     b_xj = F.broadcast_to(xj, (self.n_label**2,)+xj.shape)

@@ -1,11 +1,41 @@
-""" ETL to extract the ACE 2005 English corpus to yaat json format """
+""" ETL to extract the ACE 2005 English corpus to yaat json format.
+
+Notes:
+------
+* This conversion tokenizes the document and converts all offsets to indices in
+the tokens, instead of char indices in the document.
+
+* Each entity, event trigger, relation, and event arg are converted to a json
+format, which encodes the extraction annotations as a 'graph'
+
+* Coreferent edges can also be synthecally added. Since ACE didn't specifically
+annotate coreference, all pairwise coreferent edges are added.
+
+* This does NOT preprocess documents into sentences, or provide dependency
+information. This is because there are spans and edges that cross the
+sentence boundaries.
+
+* This script does provide POS information for tokens, as tagged by SpaCy
+
+* To match the ACE evaluation, there is an option to include head spans only,
+instead of the full span of a mention.
+
+* This script will NOT ignore spans that overlap or nest.
+It will also NOT ignore self referential relations. It is up to model preprocessing
+to decide how to resolve these issues.
+
+"""
+import os
+import json
+import argparse
 from glob import glob
 from io import open
 from time import time
+
 from bs4 import BeautifulSoup as bs
 import spacy
-import json
 
+from infonet.util import sec2hms
 
 ######################
 ### EXTRACTOR DEFS ###
@@ -27,16 +57,26 @@ def extract_anchor2offset(annotation_soup):
 def mention2str(node, tokens):
     # check if the tokens are actually just all characters
     if all([len(token)==1 for token in tokens]):
-        joinstr = ""
+        return u'"[{}:{}]{}"'.format(node['node-type'], node['type'],
+            u"".join(tokens[node['ann-span'][0]:node['ann-span'][1]+1]))
     else:
-        joinstr = " "
-    return '"{}":{}:{}'.format(joinstr.join(tokens[node['ann-span'][0]:node['ann-span'][1]]),
-                              node['node-type'], node['type'])
+        return u'"[{}:{}]{}"'.format(node['node-type'], node['type'],
+            u" ".join(tokens[node['ann-span'][0]:node['ann-span'][1]]))
 
-def relation2str(edge, node_map, tokens):
-    e1 = mention2str(node_map[edge['ann-left']], tokens)
-    e2 = mention2str(node_map[edge['ann-right']], tokens)
-    return '({}){}({}) (d={})'.format(e1, edge['type'], e2, edge['dist'])
+def relation2str(edge, node_map, tokens, show_context=True):
+    m1 = node_map[edge['ann-left']]
+    m2 = node_map[edge['ann-right']]
+    e1 = mention2str(m1, tokens)
+    e2 = mention2str(m2, tokens)
+    if show_context:
+        # check if the tokens are actually just all characters
+        if all([len(token)==1 for token in tokens]):
+            context = u"".join(tokens[m1['ann-span'][0]:m2['ann-span'][1]+1])
+        else:
+            context = u" ".join(tokens[m1['ann-span'][0]:m2['ann-span'][1]])
+        return u'({}){}({}) :: "{}"'.format(e1, edge['type'], e2, context)
+    else:
+        return u'({}){}({})'.format(e1, edge['type'], e2)
 
 def extract_value_nodes(annotations, anchor2offset):
     """ Extract the value nodes from the ACE document """
@@ -59,7 +99,8 @@ def extract_value_nodes(annotations, anchor2offset):
                 value_nodes.append(node)
     return value_nodes
 
-def extract_entity_nodes(annotations, anchor2offset, use_head_span=True, tokens=None):
+def extract_entity_nodes(annotations, anchor2offset,
+                         use_head_span=True, tokens=None, v=0):
     """ Extract the entity nodes from ACE
 
     If use_head, create entity nodes using their heads for spans.
@@ -72,10 +113,12 @@ def extract_entity_nodes(annotations, anchor2offset, use_head_span=True, tokens=
 
     entity_nodes = []
     for entity in entities:
-        if tokens: print '-'*50
+        if tokens and v > 2:
+            print '-'*50
         for entity_mention in entity_mentions:
             parent_entity_id = entity_mention.find('feature', {'name':'entity'}).text
             if parent_entity_id == entity['id']:
+                error_flag = False
                 if use_head_span:
                     head = entity_mention.find('feature', {'name':'head'})
                     if head is not None:
@@ -86,11 +129,15 @@ def extract_entity_nodes(annotations, anchor2offset, use_head_span=True, tokens=
                                 mention_span = (anchor2offset[head_mention['start']],
                                                 anchor2offset[head_mention['end']])
                         if mention_span is None:
-                            print "EMPTY HEAD FOR MENTION: {}, USING FULL SPAN".format(entity_mention)
+                            if v > 1:
+                                print "\tEMPTY HEAD FOR MENTION: {}, USING FULL SPAN".format(entity_mention['id'])
+                                error_flag = True
                             mention_span = (anchor2offset[entity_mention['start']],
                                             anchor2offset[entity_mention['end']])
                     else:
-                        print "NO HEAD FOR MENTION: {}, USING FULL SPAN".format(entity_mention)
+                        if v > 1:
+                            print "\tNO HEAD FOR MENTION: {}, USING FULL SPAN".format(entity_mention['id'])
+                            error_flag = True
                         mention_span = (anchor2offset[entity_mention['start']],
                                         anchor2offset[entity_mention['end']])
 
@@ -108,22 +155,25 @@ def extract_entity_nodes(annotations, anchor2offset, use_head_span=True, tokens=
                 for feature in entity_mention.find_all('feature'):
                     if feature['name'] not in set(['head', 'indexing_type']):
                         node[feature['name'].replace('type', 'mention_type')] = feature.text
-                if tokens: print '*', mention2str(node, tokens)
+                if tokens and ((error_flag and v > 1) or v > 2):
+                    print '\t*', mention2str(node, tokens)
                 entity_nodes.append(node)
     return entity_nodes
 
-def extract_event_anchor_nodes(annotations, anchor2offset, tokens=None):
+def extract_event_anchor_nodes(annotations, anchor2offset, tokens=None, v=0):
     """ Extract the event anchor mentions """
     events = [ a for a in annotations if a['type'] == 'event']
     event_mentions = [ a for a in annotations if a['type'] == 'event_mention']
     event_mention_anchors = [ a for a in annotations if a['type'] == 'event_mention_anchor']
     event_anchor_nodes = []
     for event in events:
-        if tokens: print '='*80
+        if tokens and v > 2:
+            print '\t='*80
         for event_mention in event_mentions:
             parent_event_id = event_mention.find('feature', {'name':'event'}).text
             if parent_event_id == event['id']:
-                if tokens: print '-'*80
+                if tokens and v > 2:
+                    print '\t-'*80
                 child_anchor_id = event_mention.find('feature', {'name':'anchor'}).text
                 for event_mention_anchor in event_mention_anchors:
                     if child_anchor_id == event_mention_anchor['id']:
@@ -144,18 +194,12 @@ def extract_event_anchor_nodes(annotations, anchor2offset, tokens=None):
                             if feature['name'] not in set(['anchor', 'indexing_type']):
                                 node[feature['name']] = feature.text
 
-                        if tokens: print mention2str(node, tokens)
+                        if tokens and v > 2:
+                            print '\t'+mention2str(node, tokens)
                         event_anchor_nodes.append(node)
     return event_anchor_nodes
 
-def edge_dist(edge, node_map):
-    """ Calculate the distance between the two arguments of an edge
-    as the difference between the left boundaries of the argument spans
-    """
-    return (node_map[edge['ann-right']]['ann-span'][0]
-            - node_map[edge['ann-left']]['ann-span'][0])
-
-def extract_relation_edges(annotations, node_map, tokens=None):
+def extract_relation_edges(annotations, node_map, tokens=None, v=0):
     """ Extraction relation egdes """
     relations = [ a for a in annotations if a['type'] == 'relation']
     relation_mentions = [ a for a in annotations if a['type'] == 'relation_mention']
@@ -216,18 +260,20 @@ def extract_relation_edges(annotations, node_map, tokens=None):
                     edge['type'] = u'<-{}--'.format(edge['type'])
                     edge['subtype'] = u'<-{}--'.format(edge['subtype'])
                 else:
-                    # arg1 and arg2 occupy identical spans. just use the order given
-                    print "RELATION SAME SPANS E1:{}, E2:{}".format(nominals[0], nominals[1])
                     edge['ann-left'] = nominals[0]
                     edge['ann-right'] = nominals[1]
                     edge['type'] = u'--{}->'.format(edge['type'])
                     edge['subtype'] = u'--{}->'.format(edge['subtype'])
-                edge['dist'] = edge_dist(edge, node_map)
+                    # arg1 and arg2 occupy identical spans. just use the order given
+                    if tokens and v > 1:
+                        print "\tRELATION SAME SPANS {}".format(
+                            relation2str(edge, node_map, tokens))
                 edges.append(edge)
-                if tokens: print relation2str(edge, node_map, tokens)
+                if tokens and v > 2:
+                    print "\t"+relation2str(edge, node_map, tokens)
     return edges
 
-def extract_event_participant_edges(annotations, node_map, tokens=None):
+def extract_event_participant_edges(annotations, node_map, tokens=None, v=0):
     """ Extract all of the edges representing event arguments """
     event_mention_participants = [ a for a in annotations if a['type'] == 'event_mention_participant']
     event_mention2event_anchor = {node['event-mention']:node['ann-uid'] for node in node_map.values()
@@ -273,18 +319,20 @@ def extract_event_participant_edges(annotations, node_map, tokens=None):
             edge['type'] = u'<-ARG:{}--'.format(role)
             edge['subtype'] = u'<-ARG:{}--'.format(subrole)
         else:
-            # arg1 and arg2 occupy identical spans. just use the order given
-            print "EVENT PARTICIPANT SAME SPANS EV:{}, ARG:{}".format(event_mention_anchor_id, entity_mention_id)
             edge['ann-left'] = event_mention_anchor_id
             edge['ann-right'] = entity_mention_id
             edge['type'] = u'--ARG:{}->'.format(role)
             edge['subtype'] = u'--ARG:{}->'.format(subrole)
-        edge['dist'] = edge_dist(edge, node_map)
+            # arg1 and arg2 occupy identical spans. just use the order given
+            if tokens and v > 1:
+                print "\tEVENT PARTICIPANT SAME SPANS {}".format(
+                    relation2str(edge, node_map, tokens))
         edges.append(edge)
-        if tokens: print relation2str(edge, node_map, tokens)
+        if tokens and v > 2:
+            print "\t"+relation2str(edge, node_map, tokens)
     return edges
 
-def extract_coreferent_edges(annotations, node_map, tokens=None):
+def extract_coreferent_edges(annotations, node_map, tokens=None, v=0):
     """ Synthetically create an edge for each pair of coreferent mentions """
     entities = [ a for a in annotations if a['type'] == 'entity']
     entity_mentions = [ a for a in annotations if a['type'] == 'entity_mention']
@@ -299,7 +347,7 @@ def extract_coreferent_edges(annotations, node_map, tokens=None):
                 em2_id = mention2['id']
                 edge = {u'ann-type':u'edge',
                         u'ann-uid':'{}={}'.format(e1_id, e2_id),
-                        u'edge-type':u'coreference',
+                        u'edge-type':u'coref',
                         u'type':u'--SameAs--'}
                 # now decide the left and right (lexically, not by relation direction)
                 # by ordering the left end of their spans
@@ -321,14 +369,15 @@ def extract_coreferent_edges(annotations, node_map, tokens=None):
                     edge['ann-left'] = em2_id
                     edge['ann-right'] = em1_id
                 else:
-                    # two identical spans. don't do coref here
-#                     continue
-                    print "COREFERENT SAME SPANS, EM1:{}, EM2:{}".format(em1_id, em2_id)
+                    # two identical spans
                     edge['ann-left'] = em1_id
                     edge['ann-right'] = em2_id
-                edge['dist'] = edge_dist(edge, node_map)
+                    if tokens and v > 1:
+                        print "\tCOREFERENT SAME SPANS {}".format(
+                            relation2str(edge, node_map, tokens))
                 edges.append(edge)
-                if tokens: print relation2str(edge, node_map, tokens)
+                if tokens and v > 2:
+                    print "\t"+relation2str(edge, node_map, tokens)
     return edges
 
 def convert_charspans_to_tokenspans(nodes, spacy_doc):
@@ -355,165 +404,163 @@ def convert_charspans_to_tokenspans(nodes, spacy_doc):
 
     return nodes, tokens, pos
 
-    # """ Converts document level annotations at the character level
-    # to token level annotations at the sentence level.
-    #
-    # Also return the tokenized document as sentences and include pos tags
-    # """
-    # char2token_idxmap = {}
-    # char2sent_idxmap = {}
-    # sentidx2tokenoffset = [0]
-    # doc_tokens, doc_pos = [], []
-    # j = 0
-    # for sent_idx, sent in enumerate(spacy_doc.sents):
-    #     sent_tokens, sent_pos = [], []
-    #     for token_idx, token in enumerate(sent):
-    #         token_width = len(token) + len(token.whitespace_)
-    #         sent_tokens.append(token.text)
-    #         sent_pos.append(token.pos_)
-    #         for i in range(token_width):
-    #             char2sent_idxmap[j] = sent_idx
-    #             char2token_idxmap[j] = token_idx
-    #             j += 1
-    #     doc_tokens.append(sent_tokens)
-    #     doc_pos.append(sent_pos)
-    #     sentidx2tokenoffset.append(sentidx2tokenoffset[-1]+token_idx)
-    #
-    # def charspan2tokenspan((char_start, char_end)):
-    #     if char2sent_idxmap[char_start] != char2sent_idxmap[char_end]:
-    #         # print sentidx2tokenoffset
-    #         print "tag spanning across sentences...{},{}\n'{}'".format(
-    #         char2sent_idxmap[char_start], char2sent_idxmap[char_end],
-    #         spacy_doc[sentidx2tokenoffset[char2sent_idxmap[char_start]-5]+char2token_idxmap[char_start]:
-    #         sentidx2tokenoffset[char2sent_idxmap[char_end]+5]+char2token_idxmap[char_end]+1])
-    #         raise ValueError
-    #     return (char2token_idxmap[char_start],
-    #             char2token_idxmap[char_end]+1,
-    #             char2sent_idxmap[char_end])
-    # for node in nodes:
-    #     try:
-    #         node['ann-span'] = charspan2tokenspan(node['ann-span'])
-    #     except ValueError:
-    #         print spacy_doc.text[node['ann-span'][0]:node['ann-span'][1]+1]
-    #         print "Invalid node {}".format(node)
-    #         print
-    #         quit()
+def calc_edge_dists(edges, node_map, tokens):
+    """ Calc edge distances from left end of right span - right end of left span.
 
+    eg, the inner distance. """
+    for edge in edges:
+        edge['dist'] = ( node_map[edge['ann-right']]['ann-span'][0]
+                       - (node_map[edge['ann-left']]['ann-span'][1] - 1))
 
-    # """ create a function that buckets char idxs to token idxs"""
-    # char2token_idxmap = {}
-    # tokens = [] # the tokenization of the document as list(unicode)
-    # j = 0
-    # for token_idx, token in enumerate(spacy_doc):
-    #     token_width = len(token) + len(token.whitespace_)
-    #     tokens.append(token.text)
-    #     for i in range(token_width):
-    #         char2token_idxmap[j] = token_idx
-    #         j +=1
-    #
-    # def charspan2tokenspan((char_start, char_end)):
-    #     # add 1 to support python style indexing
-    #     return (char2token_idxmap[char_start], char2token_idxmap[char_end]+1)
-    #
-    # now convert the charspans in the nodes
-    # for node in nodes:
-    #     try:
-    #         node['ann-span'] = charspan2tokenspan(node['ann-span'])
-    #     except ValueError:
-    #         print spacy_doc.text[node['ann-span'][0]:node['ann-span'][1]+1]
-    #         print "Invalid node {}".format(node)
-    #         print
-    #         quit()
-    #
-    # return nodes, doc_tokens, doc_pos
-
-def extract_doc(text_f, ann_f, spacy_pipe, use_head_span=True):
+def extract_doc(text_f, ann_f, spacy_pipe, args):
     """ Do all of the extractions for a document """
     # read in the source and annotation docs
     text = open(text_f, 'r').read()
     annotation_soup = bs(open(ann_f, 'r').read(), "html.parser")
     doc_id = annotation_soup.find('metadataelement',{'name':'docid'}).text
 
-
+    # replace newlines with spaces so spacy doesn't count them as tokens
+    # but the char offsets are still correct
+    text = text.replace(u'\n', u' ')
+    doc = spacy_pipe(text)
+    # text = text.encode('utf8') # makes prints work
     # create a map of anchors to character offsets
     anchor2offset = extract_anchor2offset(annotation_soup)
 
     # extract the annotation graph
     annotations = annotation_soup.find_all('annotation')
+
     nodes = []
     nodes.extend(extract_value_nodes(annotations, anchor2offset))
     nodes.extend(extract_entity_nodes(annotations, anchor2offset,
-                                      use_head_span=use_head_span))
-    nodes.extend(extract_event_anchor_nodes(annotations, anchor2offset))
+                                      use_head_span=(not args.extent),
+                                      tokens=text,
+                                      v=args.verbosity))
+    nodes.extend(extract_event_anchor_nodes(annotations, anchor2offset,
+                                            tokens=text,
+                                            v=args.verbosity))
     node_map = {node['ann-uid']:node for node in nodes}
-    edges = []
-    edges.extend(extract_relation_edges(annotations, node_map))
-    edges.extend(extract_event_participant_edges(annotations, node_map))
-    edges.extend(extract_coreferent_edges(annotations, node_map))
 
-    # replace newlines with spaces so spacy doesn't count them as tokens
-    # but the char offsets are still correct
-    text = text.replace('\n', ' ')
-    # now tokenize the document and convert annotation charspans to token spans
-    doc = spacy_pipe(text)
+    edges = []
+    edges.extend(extract_relation_edges(annotations, node_map,
+                                        tokens=text,
+                                        v=args.verbosity))
+    edges.extend(extract_event_participant_edges(annotations, node_map,
+                                                 tokens=text,
+                                                 v=args.verbosity))
+    if args.coref:
+        edges.extend(extract_coreferent_edges(annotations, node_map,
+                                              tokens=text,
+                                              v=args.verbosity))
+
+    # convert annotation charspans to token spans
     nodes, tokens, pos = convert_charspans_to_tokenspans(nodes, doc)
+    calc_edge_dists(edges, node_map, tokens)
     return doc_id, text, tokens, pos, nodes, edges
 
-if __name__ == '__main__':
-    print "Loading Spacy..."
-    nlp = spacy.load('en')
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--extent', action='store_true', default=False,
+                        help='Use whole mention extent instead of head span')
+    parser.add_argument('--coref', action='store_true', default=False,
+                        help='Includes synthetic coreferent relations')
+    parser.add_argument('--in_folder', type=str,
+                        default='data/ACE 2005/',
+                        help='<ACE DIR>')
+    parser.add_argument('--out_folder', type=str, default='',
+                        help='Override output folder location')
+    parser.add_argument('-v', '--verbosity', type=int, default=2,
+                        help='1 shows doc by doc, 2 shows errors, 3 shows extractions.')
+    args = parser.parse_args()
+    if not args.in_folder.endswith('/'):
+        args.in_folder += '/'
+    if args.out_folder == '':
+        out_folder = args.in_folder+'yaat'
+        if args.extent:
+            out_folder +='_extent'
+        if args.coref:
+            out_folder += '_coref'
+        args.out_folder = out_folder
+    if not args.out_folder.endswith('/'):
+        args.out_folder += '/'
+    return args
 
-    text_files = glob('data/ACE 2005/data/English/*/timex2norm/*sgm')
-    annotation_files = glob('data/ACE 2005/data/English/*/timex2norm/*ag.xml')
+if __name__ == '__main__':
+    args = parse_args()
+    if not os.path.exists(args.out_folder):
+        os.makedirs(args.out_folder)
+
+    if args.verbosity > 0: print "Loading Spacy...",
+    nlp = spacy.load('en')
+    if args.verbosity > 0: print "Done"
+
+    text_files = glob(args.in_folder+'data/English/*/timex2norm/*sgm')
+    annotation_files = glob(args.in_folder+'data/English/*/timex2norm/*ag.xml')
 
     # load in the fnames from the Li/Miwa's splits
-    train_set = set(open('data/ACE 2005/splits/train.txt', 'r').read().split())
-    dev_set = set(open('data/ACE 2005/splits/dev.txt', 'r').read().split())
-    test_set = set(open('data/ACE 2005/splits/test.txt', 'r').read().split())
+    # train_set = set(open('data/ACE 2005/splits/train.txt', 'r').read().split())
+    # dev_set = set(open('data/ACE 2005/splits/dev.txt', 'r').read().split())
+    # test_set = set(open('data/ACE 2005/splits/test.txt', 'r').read().split())
 
     n = len(text_files)
 
-    train_annotations = {}
-    dev_annotations = {}
-    test_annotations = {}
+    # train_annotations = {}
+    # dev_annotations = {}
+    # test_annotations = {}
 
     start = time()
     for doc_i, (text_f, ann_f) in enumerate(zip(text_files, annotation_files)):
-        print '\rExtracting Document {} / {} : {}'.format(doc_i, n, "/".join(ann_f.split('/')[-3:]))
-        doc_id, text, tokens, pos, nodes, edges = extract_doc(text_f, ann_f, nlp)
-        fname = ann_f.split('/')[-1][:-7]
-        # print ann_f, fname
-        if fname in train_set:
-            train_annotations[doc_id] = {'text':text,
-                                       'tokens':tokens,
-                                       'pos':pos,
-                                       'annotations':nodes+edges}
-        elif fname in dev_set:
-            dev_annotations[doc_id] = {'text':text,
-                                       'tokens':tokens,
-                                       'pos':pos,
-                                       'annotations':nodes+edges}
-        elif fname in test_set:
-            test_annotations[doc_id] = {'text':text,
-                                       'tokens':tokens,
-                                       'pos':pos,
-                                       'annotations':nodes+edges}
-        else:
-            continue
+        if args.verbosity > 0:
+            print '\rExtracting Document {} / {} : {}'.format(doc_i+1, n, "/".join(ann_f.split('/')[-3:]))
+
+        out_fname = ann_f.split('/')[-1][:-7] + '.yaat'
+        # if args.extent:
+        #     out_fname +='_extent'
+        # if args.coref:
+        #     out_fname += '_coref'
+        # out_fname += '.yaat'
+        # print ann_f, out_fname
+
+        doc_id, text, tokens, pos, nodes, edges = extract_doc(text_f, ann_f, nlp, args)
+
+        annotated = {'text':text,
+                     'tokens':tokens,
+                     'pos':pos,
+                     'annotations':nodes+edges}
+        with open(args.out_folder+out_fname, 'w', encoding='utf8') as out_f:
+            out_f.write(unicode(json.dumps(annotated, ensure_ascii=False, indent=2)))
+
+        # if fname in train_set:
+        #     train_annotations[doc_id] = {'text':text,
+        #                                'tokens':tokens,
+        #                                'pos':pos,
+        #                                'annotations':nodes+edges}
+        # elif fname in dev_set:
+        #     dev_annotations[doc_id] = {'text':text,
+        #                                'tokens':tokens,
+        #                                'pos':pos,
+        #                                'annotations':nodes+edges}
+        # elif fname in test_set:
+        #     test_annotations[doc_id] = {'text':text,
+        #                                'tokens':tokens,
+        #                                'pos':pos,
+        #                                'annotations':nodes+edges}
+        # else:
+        #     continue
 
     total = time() - start
-    print "Avg {} sec / doc".format(total/float(n))
+    print "Finished: Total:{},  Avg: {} sec / doc".format(sec2hms(total), total/float(n))
     # data_f = 'data/ace_05_yaat.json'
 
-    data_f = 'data/ace_05_head_yaat_train.json'
-    print "Writing out data to {}".format(data_f)
-    with open(data_f, 'w', encoding='utf8') as outfile:
-        outfile.write(unicode(json.dumps(train_annotations, ensure_ascii=False, indent=2)))
-    data_f = 'data/ace_05_head_yaat_dev.json'
-    print "Writing out data to {}".format(data_f)
-    with open(data_f, 'w', encoding='utf8') as outfile:
-        outfile.write(unicode(json.dumps(dev_annotations, ensure_ascii=False, indent=2)))
-    data_f = 'data/ace_05_head_yaat_test.json'
-    print "Writing out data to {}".format(data_f)
-    with open(data_f, 'w', encoding='utf8') as outfile:
-        outfile.write(unicode(json.dumps(test_annotations, ensure_ascii=False, indent=2)))
+    # data_f = 'data/ace_05_head_yaat_train.json'
+    # print "Writing out data to {}".format(data_f)
+    # with open(data_f, 'w', encoding='utf8') as outfile:
+    #     outfile.write(unicode(json.dumps(train_annotations, ensure_ascii=False, indent=2)))
+    # data_f = 'data/ace_05_head_yaat_dev.json'
+    # print "Writing out data to {}".format(data_f)
+    # with open(data_f, 'w', encoding='utf8') as outfile:
+    #     outfile.write(unicode(json.dumps(dev_annotations, ensure_ascii=False, indent=2)))
+    # data_f = 'data/ace_05_head_yaat_test.json'
+    # print "Writing out data to {}".format(data_f)
+    # with open(data_f, 'w', encoding='utf8') as outfile:
+    #     outfile.write(unicode(json.dumps(test_annotations, ensure_ascii=False, indent=2)))
