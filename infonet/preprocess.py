@@ -256,7 +256,7 @@ def compute_relations(doc, mentions):
             relations.append((left_span[0], left_span[1], right_span[0], right_span[1], rel_type))
     return relations
 
-def resolve_annotations(annotations):
+def resolve_mentions_and_relations(annotations):
     """ Remove any duplicate, nested, or overlapping mentions and their relations."""
     def overlaps(node, qnode):
         nspan = node['ann-span']
@@ -275,7 +275,7 @@ def resolve_annotations(annotations):
     # so if we find a mention that is within or overlaps
     # a mention we've previously seen, omit it
     sorted_nodes = sorted([ a for a in annotations
-                           if a['ann-type'] ==u'node'],
+                           if a['ann-type'] == u'node'],
                            key=lambda x: x['ann-span'][1] - x['ann-span'][0],
                            reverse=True)
     resolved_annotations = []
@@ -296,17 +296,21 @@ def get_ace_extraction_data(count=0,
                             data_dir='data/ACE 2005/yaat/',
                             map_func_name='NoVal_BIO_map',
                             train_vocab_only=False,
-                            oversample_unks=True):
-    print "Loading data..."
+                            oversample_unks=True,
+                            v=1):
+    if v > 0:
+        print "Loading data..."
     if not splits_dir.endswith('/'): splits_dir += '/'
     if not data_dir.endswith('/'): data_dir += '/'
-    train_set = set(open(splits_dir+'train.txt', 'r').read().split())
-    dev_set = set(open(splits_dir+'dev.txt', 'r').read().split())
-    test_set = set(open(splits_dir+'test.txt', 'r').read().split())
+    train_set = open(splits_dir+'train.txt', 'r').read().split()
+    dev_set = open(splits_dir+'dev.txt', 'r').read().split()
+    test_set = open(splits_dir+'test.txt', 'r').read().split()
 
-    train_docs = [json.loads(io.open(data_dir+f+'.yaat', 'r').read()) for f in train_set]
-    dev_docs = [json.loads(io.open(data_dir+f+'.yaat', 'r').read()) for f in dev_set]
-    test_docs = [json.loads(io.open(data_dir+f+'.yaat', 'r').read()) for f in test_set]
+    train_docs = [ json.loads(io.open(data_dir+f+'.yaat', 'r').read()) for f in train_set ]
+    dev_docs = [ json.loads(io.open(data_dir+f+'.yaat', 'r').read()) for f in dev_set]
+    test_docs = [ json.loads(io.open(data_dir+f+'.yaat', 'r').read()) for f in test_set]
+    for doc, fname in zip(train_docs+dev_docs+test_docs, train_set+dev_set+test_set):
+        doc.update({'fname':fname})
     # train_data = json.loads(io.open('data/ace_05_head_yaat_train.json', 'r').read())
     # dev_data = json.loads(io.open('data/ace_05_head_yaat_dev.json', 'r').read())
     # test_data = json.loads(io.open('data/ace_05_head_yaat_test.json', 'r').read())
@@ -324,10 +328,19 @@ def get_ace_extraction_data(count=0,
                 token_vocab.add(doc['tokens'])
             else:
                 token_vocab.add(doc['tokens'])
+            doc['pos'] = [ ann['type'] for ann in doc['annotations']
+                           if ann['ann-type'] == 'node'
+                           and ann['node-type'] == 'pos' ]
             pos_vocab.add(doc['pos'])
 
+            # get rid of pos from annotations before dealing with nestings
+            doc['annotations'] = [ ann for ann in doc['annotations']
+                                   if (ann['ann-type'] == 'node'
+                                       and ann['node-type'] != 'pos')
+                                      or ann['ann-type'] == 'edge' ]
+
             # dedupe and remove nestings/overlaps
-            doc['annotations'] = resolve_annotations(doc['annotations'])
+            doc['annotations'] = resolve_mentions_and_relations(doc['annotations'])
 
             # boundary labels
             map_func = globals()[map_func_name]
@@ -385,6 +398,10 @@ def get_ace_extraction_data(count=0,
     r_train = [ doc['relations'] for doc in train_docs ]
     r_dev = [ doc['relations'] for doc in dev_docs ]
     r_test = [ doc['relations'] for doc in test_docs ]
+    # keep track of doc file names
+    f_train = [ doc['fname'] for doc in train_docs ]
+    f_dev = [ doc['fname'] for doc in dev_docs ]
+    f_test = [ doc['fname'] for doc in test_docs ]
 
     # before converting drop infrequents
     token_vocab.drop_infrequent()
@@ -393,37 +410,38 @@ def get_ace_extraction_data(count=0,
     mention_vocab.drop_infrequent()
     relation_vocab.drop_infrequent()
 
-    print "POS vocab:"
-    for i, v in pos_vocab._idx2vocab.items():
-        print '\t{}:: {}'.format(i,v)
+    if v > 1:
+        print "POS vocab:"
+        for i, v in pos_vocab._idx2vocab.items():
+            print '\t{}:: {}'.format(i,v)
 
-    print "Boundary vocab:"
-    for i, v in boundary_vocab._idx2vocab.items():
-        print '\t{}:: {}'.format(i,v)
+        print "Boundary vocab:"
+        for i, v in boundary_vocab._idx2vocab.items():
+            print '\t{}:: {}'.format(i,v)
 
-    print "Mention vocab:"
-    for i, v in mention_vocab._idx2vocab.items():
-        print '\t{}:: {}'.format(i,v)
-    #
-    print "Relation vocab:"
-    for i, v in relation_vocab._idx2vocab.items():
-        print '\t{}:: {}'.format(i,v)
-    #
-    # print "Tags to Mention types:"
-    # for t, m in tag_map['tag2mtype'].items():
-    #     print '\t{}:: {}'.format(t,m)
-    #
-    # print "Mention types to subtypes:"
-    # for m, s in mtype2msubtype.items():
-    #     print '\t{}:'.format(m)
-    #     for t in s:
-    #         print '\t  {}'.format(t)
-    #
-    print "Mention subtypes to relations:"
-    for m, s in msubtype2rtype.items():
-        print '\t{}:'.format(m)
-        for t, v in s.items():
-            print '\t  {}:: {}'.format(t, v)
+        print "Mention vocab:"
+        for i, v in mention_vocab._idx2vocab.items():
+            print '\t{}:: {}'.format(i,v)
+        #
+        print "Relation vocab:"
+        for i, v in relation_vocab._idx2vocab.items():
+            print '\t{}:: {}'.format(i,v)
+    if v > 2:
+        print "Tags to Mention types:"
+        for t, m in tag_map['tag2mtype'].items():
+            print '\t{}:: {}'.format(t,m)
+
+        print "Mention types to subtypes:"
+        for m, s in mtype2msubtype.items():
+            print '\t{}:'.format(m)
+            for t in s:
+                print '\t  {}'.format(t)
+
+        print "Mention subtypes to relations:"
+        for m, s in msubtype2rtype.items():
+            print '\t{}:'.format(m)
+            for t, v in s.items():
+                print '\t  {}:: {}'.format(t, v)
 
     # convert to indices in vocab
     ix_train = convert_sequences(x_train, token_vocab.idx)
@@ -443,7 +461,8 @@ def get_ace_extraction_data(count=0,
     ir_train = convert_sequences(r_train, convert_relation)
     ir_dev = convert_sequences(r_dev, convert_relation)
     ir_test = convert_sequences(r_test, convert_relation)
-    print '{} train, {} dev, and {} test documents'.format(len(x_train), len(x_dev), len(x_test))
+    if v > 0:
+        print '{} train, {} dev, and {} test documents'.format(len(x_train), len(x_dev), len(x_test))
 
     # oversample unks in the train data so it has the same ratio as the dev data
     if oversample_unks:
@@ -451,8 +470,9 @@ def get_ace_extraction_data(count=0,
         x_d = [token_vocab.token(i) for xs in ix_dev for i in xs]
         train_unks_ratio = float(len([x for x in x_t if x == '<UNK>']))/len(x_t)
         dev_unks_ratio = float(len([x for x in x_d if x == '<UNK>']))/len(x_d)
-        print "Oversampling training unks from {}% to {}%".format(
-            train_unks_ratio*100, dev_unks_ratio*100)
+        if v > 0:
+            print "Oversampling training unks from {}% to {}%".format(
+                train_unks_ratio*100, dev_unks_ratio*100)
         for i in range(len(ix_train)):
             for j in range(len(ix_train[i])):
                 if random.uniform(0,1) < dev_unks_ratio-train_unks_ratio:
@@ -462,8 +482,9 @@ def get_ace_extraction_data(count=0,
         x_d = [token_vocab.token(i) for xs in ix_dev for i in xs]
         train_unks_ratio = float(len([x for x in x_t if x == '<UNK>']))/len(x_t)
         dev_unks_ratio = float(len([x for x in x_d if x == '<UNK>']))/len(x_d)
-        print "Resulting sampled ratios: Train:{}%, Dev:{}%".format(
-            train_unks_ratio*100, dev_unks_ratio*100)
+        if v > 0:
+            print "Resulting sampled ratios: Train:{}%, Dev:{}%".format(
+                train_unks_ratio*100, dev_unks_ratio*100)
 
     dataset = { # vocabs
                 'token_vocab':token_vocab,
@@ -506,6 +527,10 @@ def get_ace_extraction_data(count=0,
                 'ip_test':ip_test,
                 'ib_test':ib_test,
                 'im_test':im_test,
-                'ir_test':ir_test
+                'ir_test':ir_test,
+                # names of input docs
+                'f_train':f_train,
+                'f_dev':f_dev,
+                'f_test':f_test
             }
     return dataset

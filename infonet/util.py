@@ -9,12 +9,14 @@ def convert_sequences(sequences, conversion_func):
     return [ convert_sequence(sequence, conversion_func) for sequence in sequences ]
 
 def sequences2arrays(sequences, dtype=np.int32):
+    """ Converts lists of sequences lists to to list of timestep arrays across sequences """
     return ch.functions.transpose_sequence([ np.array(seq, dtype=dtype) for seq in sequences])
 
 class SequenceIterator(ch.dataset.iterator.Iterator):
     def __init__(self, dataset, batch_size, repeat=True, shuffle=True):
         self.dataset = dataset
         self.n = n = len(self.dataset)
+        self.n_items = len(self.dataset[0])
         self.batch_size = batch_size
         self._repeat = repeat
         self.shuffle = shuffle
@@ -25,7 +27,7 @@ class SequenceIterator(ch.dataset.iterator.Iterator):
 
         self.current_position = 0
         self.epoch = 0
-        self.is_new_epoch = False
+        self.is_new_epoch = True
 
     def __next__(self):
         if not self._repeat and self.epoch > 0:
@@ -85,3 +87,13 @@ def sec2hms(secs):
     m,s = divmod(secs, 60)
     h,m = divmod(m, 60)
     return '{0:02.0f}:{1:02.0f}:{2:02.0f}'.format(h,m,s)
+
+def mode(L):
+    """ Compute the mode of a list """
+    types = {}
+    for e in L:
+        if e in types:
+            types[e] += 1
+        else:
+            types[e] = 1
+    return sorted(types.items(), reverse=True, key=lambda x:x[1])[0][0]

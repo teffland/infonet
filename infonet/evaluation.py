@@ -3,8 +3,6 @@ import matplotlib.pyplot as plt
 import seaborn as sb
 sb.set_color_codes()
 
-from tagger import extract_all_mentions
-
 def plot_learning_curve(epoch_losses, valid_losses,
                         logx=False,
                         logy=False,
@@ -55,12 +53,12 @@ def mention_precision_recall(true_mentions, pred_mentions):
         )
     return stats
 
-def mention_boundary_stats(true_ys, pred_ys, **kwds):
+def mention_boundary_stats(true_ys, pred_ys, tagger, **kwds):
     """ Calculates the precision/recall of mention boundaries
     for entire dataset according to ACE evaluation
     """
-    all_true_mentions = extract_all_mentions(true_ys, **kwds)
-    all_pred_mentions = extract_all_mentions(pred_ys, **kwds)
+    all_true_mentions = tagger.extract_all_mentions(true_ys, **kwds)
+    all_pred_mentions = tagger.extract_all_mentions(pred_ys, **kwds)
     typeset = { m[2] for seq_mentions in all_true_mentions+all_pred_mentions
                      for m in seq_mentions }
     # print typeset

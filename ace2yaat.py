@@ -389,7 +389,11 @@ def convert_charspans_to_tokenspans(nodes, spacy_doc):
     for token_idx, token in enumerate(spacy_doc):
         token_width = len(token) + len(token.whitespace_)
         tokens.append(token.text)
-        pos.append(token.pos_)
+        pos.append({'ann-type':'node',
+                    'ann-span':(token_idx, token_idx+1),
+                    'ann-uid':token_idx,
+                    'node-type':'pos',
+                    'type':token.pos_})
         for i in range(token_width):
             char2token_idxmap[j] = token_idx
             j +=1
@@ -525,8 +529,7 @@ if __name__ == '__main__':
 
         annotated = {'text':text,
                      'tokens':tokens,
-                     'pos':pos,
-                     'annotations':nodes+edges}
+                     'annotations':nodes+edges+pos}
         with open(args.out_folder+out_fname, 'w', encoding='utf8') as out_f:
             out_f.write(unicode(json.dumps(annotated, ensure_ascii=False, indent=2)))
 

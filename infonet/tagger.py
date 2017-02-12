@@ -1,13 +1,18 @@
+import json
+from io import open
+
 import numpy as np
 import chainer as ch
 import chainer.functions as F
 import chainer.links as L
 
-from util import SequenceIterator, sequences2arrays
+from util import SequenceIterator, sequences2arrays, convert_sequences, mode
 from crf_linear import LinearChainCRF
 from gru import StackedGRU
+from report import ReporterMixin
+from evaluation import mention_boundary_stats
 
-class Tagger(ch.Chain):
+class Tagger(ch.Chain, ReporterMixin):
     def __init__(self,
                  word_embeddings,
                  n_label,
@@ -24,24 +29,19 @@ class Tagger(ch.Chain):
                  mlp_activations=[],
                  mlp_dropouts=[],
                  crf_type=None,
+                 start_tags=[],
+                 in_tags=[],
+                 out_tags=[],
+                 tag2mtype=[],
                  **kwds):
-                # lstm_size, out_size,
-                #  pos_d, pos_v,
-                #  bidirectional=False,
-                #  use_mlp=False,
-                #  dropout=.25,
-                #  use_hdropout=False,
-                #  n_layers=1,101693
-
-                #  crf_type='none'):
-        super(Tagger, self).__init__()
-
+        ch.Chain.__init__(self)
         # embeddings
         self.word_size = word_embeddings.shape[1]
         word_embed = L.EmbedID(word_embeddings.shape[0], word_embeddings.shape[1],
                           word_embeddings)
         self.add_link('word_embed', word_embed)
         self.word_dropout = word_dropout
+        self.backprop_to_embeds = backprop_to_embeds
         if pos_vocab_size:
             self.use_pos = True
             self.pos_size = pos_vector_size
@@ -78,48 +78,13 @@ class Tagger(ch.Chain):
             logit = L.Linear(out_size, n_label)
             self.add_link('logit', logit)
 
-        # # setup rnn layer
-        # hdropout = dropout if use_hdropout else 0.0
-        # if bidirectional:
-        #     feature_size = 2*lstm_size
-        #     lstms = [BidirectionalGRU(lstm_size, n_inputs=embeddings.shape[1]+pos_d,
-        #                               dropout=hdropout)]
-        #     for i in range(1,n_layers):
-        #         lstms.append(BidirectionalGRU(lstm_size, n_inputs=feature_size, dropout=hdropout))
-        # else:
-        #     feature_size = lstm_size
-        #     lstms = [GRU(lstm_size, n_inputs=embeddings.shape[1]+pos_d, dropout=hdropout)]
-        #     for i in range(1,n_layers):
-        #         lstms.append(GRU(lstm_size, n_inputs=feature_size, dropout=hdropout))
+        # for decoding sequences to mention boundaries
+        self.start_tags = start_tags
+        self.in_tags = in_tags
+        self.out_tags = out_tags
+        self.tag2mtype = tag2mtype
 
-        # setup crf layer
-        # if crf_type in 'none':
-        #     self.crf_type = None
-        #     crf_type = 'simple' # it won't actually be used
-        # else:
-        #     self.crf_type = crf_type
-        #
-        # super(Tagger, self).__init__(
-        #     embed = L.EmbedID(embeddings.shape[0], embeddings.shape[1],
-        #                       embeddings),
-        #     pos_embed = L.EmbedID(pos_v, pos_d),
-        #     mlp = L.Linear(feature_size, feature_size),
-        #     out = L.Linear(feature_size, feature_size),
-        #     logit = L.Linear(feature_size, out_size),
-        #     crf = LinearChainCRF(out_size, feature_size, crf_type)
-        # )
-        # self.lstms = lstms
-        # for i, lstm in enumerate(self.lstms):
-        #     self.add_link('lstm_{}'.format(i), lstm)
-        # self.embedding_size = embeddings.shape[1]
-        # self.pos_d = pos_d
-        # self.lstm_size = lstm_size
-        # self.feature_size = feature_size
-        # self.out_size = out_size
-        # self.dropout = dropout
-        # self.bidirectional = bidirectional
-        # self.use_mlp = use_mlp
-        # self.use_hdropout = use_hdropout
+        ReporterMixin.__init__(self)
 
     def reset_state(self):
         self.gru.reset_state()
@@ -127,10 +92,18 @@ class Tagger(ch.Chain):
     def rescale_Us(self):
         self.gru.rescale_Us
 
-    def __call__(self, x_list, p_list, train=True):#, return_logits=False):
+    def __call__(self, x_list, p_list, *_, **kwds):
+        train = kwds.pop('train', True)
+        # convert lists of sequences to lists of timesteps
+        x_list = sequences2arrays(x_list)
+        p_list = sequences2arrays(p_list)
+
         # embed the tokens and pos
         self.embeds = [ F.dropout(self.word_embed(x), self.word_dropout, train)
-                   for x in x_list ]
+                        for x in x_list ]
+        if self.backprop_to_embeds:
+            for embed in self.embeds:
+                embed.unchain_backward()
         if self.use_pos:
             pos_embeds = [ F.dropout(self.pos_embed(p), self.pos_dropout, train)
                            for p in p_list ]
@@ -142,73 +115,15 @@ class Tagger(ch.Chain):
         # run mlp over features
         for dropout, activation, mlp in zip(self.mlp_dropouts, self.activations, self.mlps):
             for i in range(len(features)):
-                features[i] = F.dropout(activation(mlp(features[i])), dropout, train=train)
+                features[i] = F.dropout(activation(mlp(features[i])), dropout, train)
 
         return features
 
+    def predict(self, x_list, p_list, *_, **kwds):
+        reset = kwds.pop('reset', True)
+        train = kwds.pop('train', False)
+        unfold_preds = kwds.pop('unfold_preds', True)
 
-
-        # drop = F.dropout
-        # embeds = [ drop(self.embed(x), self.dropout, train) for x in x_list ]
-        # if self.pos_d > 0:
-        #     pos_embeds = [ drop(self.pos_embed(p), self.dropout, train) for p in p_list ]
-        #     self.embeds = [F.hstack([x,p]) for x,p in zip(embeds, pos_embeds)]
-        # else:
-        #     self.embeds = embeds
-        #
-        # # run lstm layer over embeddings
-        # if self.bidirectional:
-        #     # helper function
-        #     def bilstm(inputs, lstm):
-        #         f_lstms, b_lstms = [], []
-        #         for x_f, x_b in zip(inputs, inputs[::-1]):
-        #             h_f, h_b = lstm(x_f, x_b, train=train)
-        #             f_lstms.append(h_f)
-        #             b_lstms.append(h_b)
-        #         b_lstms = b_lstms[::-1]
-        #         return [ F.hstack([f,b]) for f,b in zip(f_lstms, b_lstms) ]
-        #
-        #     # run the layers of bilstms
-        #     # don't dropout h twice if using horizontal dropout
-        #     if self.use_hdropout:
-        #         lstms = [ h for h in bilstm(self.embeds, self.lstms[0]) ]
-        #         for lstm in self.lstms[1:]:
-        #             lstms = [ h for h in bilstm(lstms, lstm) ]
-        #     else:
-        #         lstms = [ drop(h, self.dropout, train) for h in bilstm(self.embeds, self.lstms[0]) ]
-        #         for lstm in self.lstms[1:]:
-        #             lstms = [ drop(h, self.dropout, train) for h in bilstm(lstms, lstm) ]
-        # else:
-        #     if self.use_hdropout:
-        #         # lstms = []
-        #         # for i, x in enumerate(self.embeds):
-        #         #     print i
-        #         #     lstms.append(drop(self.lstms[0](x), self.dropout, train))
-        #         # print
-        #         lstms = [ drop(self.lstms[0](x), self.dropout, train) for x in self.embeds ]
-        #         for lstm in self.lstms[1:]:
-        #             lstms = [ lstm(h, train=train) for h in lstms ]
-        #     else:
-        #         lstms = [ drop(self.lstms[0](x, train=train), self.dropout, train) for x in self.embeds ]
-        #         for lstm in self.lstms[1:]:
-        #             lstms = [ drop(lstm(h, train=train), self.dropout, train) for h in lstms ]
-        #
-        #
-        # f = F.leaky_relu
-        # # rnn output layer
-        # lstms = [ drop(f(self.out(h)), self.dropout, train) for h in lstms]
-        #
-        # # hidden layer
-        # if self.use_mlp:
-        #     lstms = [ drop(f(self.mlp(h)) , self.dropout, train) for h in lstms ]
-        #
-        # if return_logits: # no crf layer, so do simple logit layer
-        #     return [ self.logit(h) for h in lstms ]
-        # else:
-        #     return lstms
-
-    def predict(self, x_list, p_list,
-                reset=True, train=False, **kwds):
         if reset:
             self.reset_state()
 
@@ -218,25 +133,79 @@ class Tagger(ch.Chain):
         else:
             preds = [ ch.functions.argmax(self.logit(feature), axis=1)
                       for feature in self.features ]
+        if unfold_preds:
+            return ch.functions.transpose_sequence(preds)
         return preds
 
-    def report(self):
-        summary = {}
-        for link in self.links(skipself=True):
-            for param in link.params():
-                d = '{}/{}/{}'.format(link.name, param.name, 'data')
-                summary[d] = param.data
-                g = '{}/{}/{}'.format(link.name, param.name, 'grad')
-                summary[g] = param.grad
-        return summary
+    def extract_mentions(self, seq,
+                         start_tags=None,
+                         in_tags=None,
+                         out_tags=None,
+                         tag2mtype=None):
+        """ We extract mentions according to the BIO or BILOU schemes
+
+        We scan across the sequence, encountering 3 cases:
+        1. We are not in a mention, but encounter an in_tag, and start a mention
+            eg, ... O <B|I|L|U>
+        2. We are in a mention, but encounter an out_tag, and end the current mention
+            eg, ... <B|I|L|U> O
+        3. We are in a mention, but encounter a start tag,
+           and end the current mention and start a new mention
+            eg, ... <B|I|L|U> <B|U>
+
+
+        When computing the type of the mention
+        we simply take the mode of the types of it's constituent tokens.
+        """
+        start_tags = start_tags if start_tags else self.start_tags
+        in_tags = in_tags if in_tags else self.in_tags
+        out_tags = out_tags if out_tags else self.out_tags
+        tag2mtype = tag2mtype if tag2mtype else self.tag2mtype
+
+        if type(seq[0]) == ch.Variable:
+            seq = [ np.asscalar(s.data) for s in seq ]
+        mentions = []
+        in_mention = False
+        mention_start = mention_end = 0
+        for i, s in enumerate(seq):
+            if not in_mention and s in in_tags: # case 1
+                mention_start = i
+                in_mention = True
+            elif in_mention and s in out_tags: # case 2
+                if tag2mtype:
+                    mention_type = mode([ tag2mtype[s] for s in seq[mention_start:i] ])
+                else:
+                    mention_type = None
+                mentions.append((mention_start, i, mention_type))
+                in_mention=False
+            elif in_mention and s in start_tags: # case 3
+                if tag2mtype:
+                    mention_type = mode([ tag2mtype[s] for s in seq[mention_start:i] ])
+                else:
+                    mention_type = None
+                mentions.append((mention_start, i, mention_type))
+                mention_start = i
+
+        if in_mention: # we end on a mention
+            if tag2mtype:
+                mention_type = mode([ tag2mtype[s] for s in seq[mention_start:i+1] ])
+            else:
+                mention_type = None
+            mentions.append((mention_start, i+1, mention_type))
+        return mentions
+
+    def extract_all_mentions(self, seqs, **kwds):
+        return [ self.extract_mentions(seq, **kwds) for seq in seqs ]
 
 class TaggerLoss(ch.Chain):
     def __init__(self, tagger):
-        super(TaggerLoss, self).__init__(
-            tagger=tagger
-        )
+        super(TaggerLoss, self).__init__(tagger=tagger)
 
-    def __call__(self, x_list, p_list, b_list, features=None):
+    def __call__(self, x_list, p_list, b_list, *_, **kwds):
+        features = kwds.pop('features', None)
+
+        # convert lists of sequences to lists of timesteps
+        b_list = sequences2arrays(b_list)
         # inputing features skips evaluation of the network
         if self.tagger.crf_type:
             if features is None:
@@ -251,70 +220,102 @@ class TaggerLoss(ch.Chain):
                 loss += F.softmax_cross_entropy(self.tagger.logit(feature), b)
             return loss / float(len(b_list))
 
+    def reset_state(self):
+        self.tagger.reset_state()
+
     def report(self):
         return self.tagger.report()
 
-def mode(L):
-    """ Compute the mode of a list """
-    types = {}
-    for e in L:
-        if e in types:
-            types[e] += 1
-        else:
-            types[e] = 1
-    return sorted(types.items(), reverse=True, key=lambda x:x[1])[0][0]
+    def save_model(self, save_prefix):
+        ch.serializers.save_npz(save_prefix+'tagger.model', self.tagger)
 
-def extract_mentions(seq,
-                     start_tags,#=('B', 'U'),
-                     in_tags,#=('B', 'I', 'L', 'U'),
-                     out_tags,#=('O'),
-                     tag2mtype=None):
-    """ We extract mentions according to the BIO or BILOU schemes
+class TaggerEvaluator():
+    def __init__(self,
+                 tagger,
+                 token_vocab,
+                 pos_vocab,
+                 boundary_vocab,
+                 mention_vocab,
+                 tag_map):
+        self.tagger = tagger
+        self.token_vocab = token_vocab
+        self.pos_vocab = pos_vocab
+        self.boundary_vocab = boundary_vocab
+        self.mention_vocab = mention_vocab
+        self.tag_map = tag_map
 
-    We scan across the sequence, encountering 3 cases:
-    1. We are not in a mention, but encounter an in_tag, and start a mention
-        eg, ... O <B|I|L|U>
-    2. We are in a mention, but encounter an out_tag, and end the current mention
-        eg, ... <B|I|L|U> O
-    3. We are in a mention, but encounter a start tag,
-       and end the current mention and start a new mention
-        eg, ... <B|I|L|U> <B|U>
+    def evaluate(self, batch_iter, save_prefix=None):
+        all_bpreds, all_bs = [], []
+        all_xs, all_truexs = [], []
+        all_ps = []
+        all_fs = []
+        all_ms = []
+        assert batch_iter.is_new_epoch
+        for batch in batch_iter:
+            ix, ip, ib, f, truex, m = zip(*batch)
+            ib_preds = [ pred.data for pred in self.tagger.predict(ix, ip) ]
 
+            all_bpreds.extend(convert_sequences(ib_preds, self.boundary_vocab.token))
+            all_bs.extend(convert_sequences(ib, self.boundary_vocab.token))
+            all_xs.extend(convert_sequences(ix, self.token_vocab.token))
+            all_truexs.extend(truex) # never passed through vocab. no UNKS
+            all_ps.extend(convert_sequences(ip, self.pos_vocab.token))
+            all_fs.extend(f)
+            all_ms.extend(m)
+            if batch_iter.is_new_epoch:
+                break
 
-    When computing the type of the mention
-    we simply take the mode of the types of it's constituent tokens.
-    """
-    if type(seq[0]) == ch.Variable:
-        seq = [ np.asscalar(s.data) for s in seq ]
-    mentions = []
-    in_mention = False
-    mention_start = mention_end = 0
-    for i, s in enumerate(seq):
-        if not in_mention and s in in_tags: # case 1
-            mention_start = i
-            in_mention = True
-        elif in_mention and s in out_tags: # case 2
-            if tag2mtype:
-                mention_type = mode([ tag2mtype[s] for s in seq[mention_start:i] ])
-            else:
-                mention_type = None
-            mentions.append((mention_start, i, mention_type))
-            in_mention=False
-        elif in_mention and s in start_tags: # case 3
-            if tag2mtype:
-                mention_type = mode([ tag2mtype[s] for s in seq[mention_start:i] ])
-            else:
-                mention_type = None
-            mentions.append((mention_start, i, mention_type))
-            mention_start = i
+        if save_prefix:
+            print "Saving predictions to {} ...".format(save_prefix),
+            # extract the true and predicted mention boundaries
+            convert_mention = lambda x: x[:-1]+(self.mention_vocab.token(x[-1]),)
+            all_ms = convert_sequences(all_ms, convert_mention)
+            ib_preds = convert_sequences(all_bpreds, self.boundary_vocab.idx)
+            all_mpreds = self.tagger.extract_all_mentions(ib_preds)
+            all_mpreds = convert_sequences(all_mpreds, convert_mention)
 
-    if in_mention: # we end on a mention
-        if tag2mtype:
-            mention_type = mode([ tag2mtype[s] for s in seq[mention_start:i+1] ])
-        else:
-            mention_type = None
-        mentions.append((mention_start, i+1, mention_type))
-    return mentions
+            # save each true and predicted doc to separate yaat file
+            trues = zip(all_fs, all_truexs, all_ps, all_bs, all_ms)
+            for f, xs, ps, bs, ms in trues:
+                fname = save_prefix+f+'_true'
+                self.save_doc(fname, xs, ps, bs, ms)
 
-def extract_all_mentions(seqs, **kwds):
-    return [extract_mentions(seq, **kwds) for seq in seqs]
+            preds = zip(all_fs, all_xs, all_ps, all_bpreds, all_mpreds)
+            for f, xs, ps, bs, ms in preds:
+                fname = save_prefix+f+'_pred'
+                self.save_doc(fname, xs, ps, bs, ms)
+            print "Done"
+
+        stats = mention_boundary_stats(all_bs, all_bpreds, self.tagger, **self.tag_map)
+        stats['score'] = stats['f1']
+        return stats
+
+    def save_doc(self, fname, xs, ps, bs, ms):
+        """ Save predictions to a yaat file """
+        yaat_ps = []
+        for i, p in enumerate(ps):
+            yaat_ps.append({'ann-type':'node',
+                            'ann-uid':'p_'+str(i),
+                            'ann-span':(i, i+1),
+                            'node-type':'pos',
+                            'type':p})
+        yaat_bs = []
+        for i, b in enumerate(bs):
+            yaat_bs.append({'ann-type':'node',
+                            'ann-uid':'b_'+str(i),
+                            'ann-span':(i, i+1),
+                            'node-type':'boundary',
+                            'type':b})
+        yaat_ms = []
+        for i, m in enumerate(ms):
+            yaat_ms.append({'ann-type':'node',
+                            'ann-uid':'m_'+str(i),
+                            'ann-span':m[:2],
+                            'node-type':m[2],
+                            'type':m[2]})
+        doc = {
+            'tokens':xs,
+            'annotations':yaat_ps+yaat_bs+yaat_ms
+        }
+        with open(fname+'.yaat', 'w', encoding='utf8') as f:
+            f.write(unicode(json.dumps(doc, ensure_ascii=False, indent=2)))
