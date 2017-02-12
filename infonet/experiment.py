@@ -37,7 +37,7 @@ def reset_stats(STATS):
     return STATS
 
 def train(model_loss, train_iter, model_evaluator, dev_iter, config, save_prefix,
-          v=1):
+          v=1, **loss_kwds):
     if v > 0:
         print "Training..."
     # setup the optimizer
@@ -66,7 +66,7 @@ def train(model_loss, train_iter, model_evaluator, dev_iter, config, save_prefix
 
         # run model
         start = time.time()
-        loss = model_loss(*zip(*batch))
+        loss = model_loss(*zip(*batch), **loss_kwds)
         STATS['forward_times'].append(time.time()-start)
         loss_val = np.asscalar(loss.data)
         if v > 2:
@@ -103,7 +103,7 @@ def train(model_loss, train_iter, model_evaluator, dev_iter, config, save_prefix
                 best_dev_score = dev_stats['score']
                 n_dev_down = 0
                 if v > 1:
-                    print "Saving model...",
+                    print "Saving model to {} ...".format(save_prefix),
                 model_loss.save_model(save_prefix)
                 if v > 1:
                     print "Done"

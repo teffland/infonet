@@ -131,17 +131,17 @@ if __name__ == '__main__':
         tagger.rescale_Us() # for recurrent dropout
 
     # restore best and evaluate
-    if v > 0:
+    if args.v > 0:
         print 'Restoring best model...',
     ch.serializers.load_npz(save_prefix+'tagger.model', tagger)
-    if v > 0:
+    if args.v > 0:
         print 'Done'
 
     doc_save_prefix = save_prefix+'docs/'
     if not os.path.exists(doc_save_prefix):
         os.makedirs(doc_save_prefix)
 
-    if v > 0:
+    if args.v > 0:
         print 'Evaluating...'
     STATS = {}
     STATS['train_eval'] = tagger_evaluator.evaluate(train_iter, doc_save_prefix)
@@ -151,7 +151,7 @@ if __name__ == '__main__':
     STATS['test_eval'] = tagger_evaluator.evaluate(test_iter, doc_save_prefix)
     print_f1_stats('Test', STATS['test_eval'])
     dump_stats(STATS, save_prefix+'eval')
-    if v > 0:
+    if args.v > 0:
         print "Finished Experiment"
 
     # save the total precision, recall, and f1s in global file

@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h1>Experiment: {{experiment_name}}</h1>
+
+<h3>Configuration</h3>
+<ul>
+{% for k,v in exp_config.items() recursive %}
+  {% if v|isdict %}
+    <li>{{k}}<ul>{{ loop(v.items()) }}</ul></li>
+  {% else %}
+    <li>{{k}}: {{v}}</li>
+  {% endif %}
+{% endfor %}
+</ul>
+
+<h3>Training Report</h3>
+
+<script type=text/javascript>
+  learningCurve({{batch_losses|tojson}}, {{dev_scores|tojson}});
+</script>
+
+{% endblock %}

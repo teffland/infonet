@@ -16,7 +16,7 @@ class Tagger(ch.Chain, ReporterMixin):
     def __init__(self,
                  word_embeddings,
                  n_label,
-                 backprop_to_embeds=False,
+                 backprop_to_words=False,
                  word_dropout=.5,
                  pos_vocab_size=0,
                  pos_vector_size=25,
@@ -41,7 +41,7 @@ class Tagger(ch.Chain, ReporterMixin):
                           word_embeddings)
         self.add_link('word_embed', word_embed)
         self.word_dropout = word_dropout
-        self.backprop_to_embeds = backprop_to_embeds
+        self.backprop_to_words = backprop_to_words
         if pos_vocab_size:
             self.use_pos = True
             self.pos_size = pos_vector_size
@@ -52,30 +52,30 @@ class Tagger(ch.Chain, ReporterMixin):
             self.use_pos = False
 
         # gru layers
-        in_size = self.word_size + self.pos_size if self.use_pos else self.word_size
-        gru = StackedGRU(in_size, gru_state_sizes,
+        self.embed_size = self.word_size + self.pos_size if self.use_pos else self.word_size
+        gru = StackedGRU(self.embed_size, gru_state_sizes,
                          dropouts=gru_dropouts,
                          hdropouts=gru_hdropouts)
         self.add_link('gru', gru)
-        out_size = gru_state_sizes[-1]
+        self.feature_size = gru_state_sizes[-1]
 
         # mlp layers
         self.mlp_dropouts = mlp_dropouts
         self.activations = [ getattr(F, f) for f in mlp_activations ]
         self.mlps = []
         for i, hidden_dim in enumerate(mlp_sizes):
-            mlp = L.Linear(out_size, hidden_dim)
+            mlp = L.Linear(self.feature_size, hidden_dim)
             self.mlps.append(mlp)
-            self.add_link('mlp_'+i, mlp)
-            out_size = hidden_dim
+            self.add_link('mlp_{}'.format(i), mlp)
+            self.feature_size = hidden_dim
 
         # crf layer
         self.crf_type = crf_type if crf_type.lower() != 'none' else None
         if self.crf_type:
-            crf = LinearChainCRF(out_size, n_label, self.crf_type)
+            crf = LinearChainCRF(self.feature_size , n_label, self.crf_type)
             self.add_link('crf', crf)
         else:
-            logit = L.Linear(out_size, n_label)
+            logit = L.Linear(self.feature_size , n_label)
             self.add_link('logit', logit)
 
         # for decoding sequences to mention boundaries
@@ -92,22 +92,28 @@ class Tagger(ch.Chain, ReporterMixin):
     def rescale_Us(self):
         self.gru.rescale_Us
 
-    def __call__(self, x_list, p_list, *_, **kwds):
-        train = kwds.pop('train', True)
+    def embed(self, x_list, p_list, train=True):
         # convert lists of sequences to lists of timesteps
         x_list = sequences2arrays(x_list)
         p_list = sequences2arrays(p_list)
 
         # embed the tokens and pos
-        self.embeds = [ F.dropout(self.word_embed(x), self.word_dropout, train)
+        embeds = [ F.dropout(self.word_embed(x), self.word_dropout, train)
                         for x in x_list ]
-        if self.backprop_to_embeds:
-            for embed in self.embeds:
+        if self.backprop_to_words:
+            for embed in embeds:
                 embed.unchain_backward()
         if self.use_pos:
             pos_embeds = [ F.dropout(self.pos_embed(p), self.pos_dropout, train)
                            for p in p_list ]
-            self.embeds = [ F.hstack([x,p]) for x,p in zip(self.embeds, pos_embeds)]
+            embeds = [ F.hstack([x,p]) for x,p in zip(embeds, pos_embeds)]
+        return embeds
+
+    def __call__(self, x_list, p_list, *_, **kwds):
+        train = kwds.pop('train', True)
+
+        # embed the inputs
+        self.embeds = self.embed(x_list, p_list, train=train)
 
         # run gru over them
         features = self.gru(self.embeds, train=train)
@@ -131,10 +137,10 @@ class Tagger(ch.Chain, ReporterMixin):
         if self.crf_type:
             _, preds = self.crf.argmax(self.features)
         else:
-            preds = [ ch.functions.argmax(self.logit(feature), axis=1)
+            preds = [ F.argmax(self.logit(feature), axis=1)
                       for feature in self.features ]
         if unfold_preds:
-            return ch.functions.transpose_sequence(preds)
+            return F.transpose_sequence(preds)
         return preds
 
     def extract_mentions(self, seq,

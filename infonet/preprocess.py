@@ -256,6 +256,14 @@ def compute_relations(doc, mentions):
             relations.append((left_span[0], left_span[1], right_span[0], right_span[1], rel_type))
     return relations
 
+def compute_max_dists(docs):
+    max_rel_dist = 0
+    for doc in docs:
+        for ann in doc['annotations']:
+            if ann['ann-type'] == 'edge' and int(ann['dist']) > max_rel_dist:
+                max_rel_dist = int(ann['dist'])
+    return max_rel_dist
+
 def resolve_mentions_and_relations(annotations):
     """ Remove any duplicate, nested, or overlapping mentions and their relations."""
     def overlaps(node, qnode):
@@ -324,8 +332,9 @@ def get_ace_extraction_data(count=0,
     relation_vocab = Vocab(min_count=0)
     for dataset_i, docs in enumerate([train_docs, dev_docs, test_docs]):
         for doc in docs:
-            if train_vocab_only and dataset_i ==0:
-                token_vocab.add(doc['tokens'])
+            if train_vocab_only:
+                if dataset_i ==0:
+                    token_vocab.add(doc['tokens'])
             else:
                 token_vocab.add(doc['tokens'])
             doc['pos'] = [ ann['type'] for ann in doc['annotations']
@@ -531,6 +540,11 @@ def get_ace_extraction_data(count=0,
                 # names of input docs
                 'f_train':f_train,
                 'f_dev':f_dev,
-                'f_test':f_test
+                'f_test':f_test,
+                # dists
+                'max_r_dist':compute_max_dists(train_docs)
             }
+
+    print 'train {}, dev {}, test {} max dists'.format(
+        compute_max_dists(train_docs), compute_max_dists(dev_docs), compute_max_dists(test_docs))
     return dataset

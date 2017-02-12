@@ -6,12 +6,12 @@ preprocess:
   splits_dir: /Users/thomaseffland/Development/infonet/data/ACE 2005/splits/
   data_dir: /Users/thomaseffland/Development/infonet/data/ACE 2005/yaat/
   map_func_name: E_BIO_map
-  train_vocab_only: &EMBED_BACKPROP True
+  train_vocab_only: &EMBED_BACKPROP False
   oversample_unks: True
 
 train:
-  n_epoch: 100
-  batch_size: 50
+  n_epoch: 50
+  batch_size: 400
   patience: 20
 
 optimizer:
@@ -22,15 +22,15 @@ optimizer:
 
 tagger:
   word_vector_size: /Users/thomaseffland/Development/infonet/data/word_vectors/glove.6B.200d.txt
-  backprop_to_embeds: *EMBED_BACKPROP
+  backprop_to_words: *EMBED_BACKPROP
   word_dropout: .5
-  pos_vector_size: 25
-  pos_dropout: .5
+  pos_vector_size: 0
+  pos_dropout: .25
   gru_state_sizes: [ 100 ]  # more than one creates stacked grus
   bidirectional: True
   gru_dropouts: [ .5 ]      # dropouts on outputs of gru
-  gru_hdropouts: [ 0.0 ]     # horizontal dropouts on gru (overrides gru_dropouts if > 0)
-  mlp_sizes: [ ]            # hidden layer sizes
-  mlp_activations: [ ]      # eg, sigmoid or leaky_relu
-  mlp_dropouts: [ ]         # dropout for mlp layers
-  crf_type: simple          # choose from [None, simple, linear, simple_bilinear, bilinear]
+  gru_hdropouts: [ .5 ]     # horizontal dropouts on gru (overrides gru_dropouts if > 0)
+  mlp_sizes: [ 100 ]            # hidden layer sizes
+  mlp_activations: [ leaky_relu ]      # eg, sigmoid or leaky_relu
+  mlp_dropouts: [.5 ]         # dropout for mlp layers
+  crf_type: bilinear        # choose from [None, simple, linear, simple_bilinear, bilinear]

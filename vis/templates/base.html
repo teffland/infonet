@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    {% block head %}
+    <link rel=stylesheet type=text/css href="{{ url_for('static', filename='style.css') }}">
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/d3/4.5.0/d3.js"></script>
+    <script type="text/javascript" src="{{ url_for('static', filename='js/graphs.js') }}"></script>
+    <title>{% block title %}{% endblock %} InfoNet Visualizer</title>
+    {% endblock %}
+</head>
+<body>
+    <div id="content">{% block content %}{% endblock %}</div>
+    <div id="footer">
+        {% block footer %}
+         -- Visualizing InfoNet --
+        {% endblock %}
+    </div>
+</body>
+</html>
