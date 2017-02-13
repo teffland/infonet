@@ -47,6 +47,7 @@ extractor:
     outer_window_size: 5      # size of context window outside of mentions when pooling
     include_width: True    # include the inner width of the pooling span as a feature
     max_r_dist: 'infer'    # max token dist between mentions to automatically prune to NULL. 'infer' figures out from data
+    reweight: True
   classification_options:
     constraint_mask: True   # whether to automatically apply class compatibility masking
     method: staged     # choose from [staged, mean_field, loopy_bp]

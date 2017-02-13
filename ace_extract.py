@@ -133,7 +133,7 @@ if __name__ == '__main__':
     if not args.eval:
         train(extractor_loss, train_iter,
               extractor_evaluator, dev_iter,
-              config, save_prefix, v=args.v)
+              config, save_prefix, v=args.v, reweight_relations=True)
         extractor.rescale_Us() # for recurrent dropout
 
     # restore best and evaluate
