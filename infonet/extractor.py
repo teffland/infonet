@@ -578,6 +578,7 @@ class ExtractorLoss(ch.Chain):
                         weights.append(0.0)
                         labels.append(0)
                 weights = np.array(weights, dtype=np.float32)
+                print 'men_weights total {}, len {}'.format(weights.sum(), len(weights))
                 labels = np.array(labels, dtype=np.int32)
                 doc_mention_loss = batch_weighted_softmax_cross_entropy(m_logits, labels,
                                                                         instance_weight=weights)
@@ -609,6 +610,7 @@ class ExtractorLoss(ch.Chain):
                         weights.append(0.0)
                         labels.append(0)
                 weights = np.array(weights, dtype=np.float32)
+                print 'rel_weights total {}, len {}'.format(weights.sum(), len(weights))
                 labels = np.array(labels, dtype=np.int32)
                 # the relation labels can be heavily biased.
                 # so we reweight the class losses proportional
