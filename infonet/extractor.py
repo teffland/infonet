@@ -623,6 +623,7 @@ class ExtractorLoss(ch.Chain):
                     class_weights[unique] = counts
                     total = counts.sum().astype(np.float32)
                     class_weights = self.extractor.n_relation_class/(total/counts)
+                    print r_logits.shape, class_weights.shape, class_weights
                     assert class_weights.sum() == self.extractor.n_relation_class
                     doc_relation_loss = batch_weighted_softmax_cross_entropy(r_logits, labels,
                                                                          class_weight=class_weights,
