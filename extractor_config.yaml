@@ -1,10 +1,10 @@
 experiment_dir: /Users/thomaseffland/Development/infonet/experiments/
-tagger: /Users/thomaseffland/Development/infonet/experiments/tagger_Feb-02-2017-19:19:256420/
+tagger: /Users/thomaseffland/Development/infonet/experiments/tagger_Feb-02-2017-18:24:207917/
 # TODO: Allow an 'infer best' option that automatically picks best tagger
 
 train:
-  n_epoch: 100
-  batch_size: 10
+  n_epoch: 1
+  batch_size: 50
   patience: 20
 
 optimizer:
@@ -14,9 +14,9 @@ optimizer:
   grad_clip: 10.
 
 extractor:
-  use_gold_boundaries: False
-  build_on_tagger_features: True
-  backprop_to_tagger: True
+  use_gold_boundaries: True
+  build_on_tagger_features: False
+  backprop_to_tagger: False
   shared_options:
     gru_state_sizes: [ 100 ]  # more than one creates stacked grus
     bidirectional: True
@@ -44,9 +44,9 @@ extractor:
     mlp_activations: [ leaky_relu ]      # eg, sigmoid or leaky_relu
     mlp_dropouts: [ .5 ]         # dropout for mlp layers
     pooling: avg               # choose from [sum, avg, max, logsumexp, attention]
-    outer_window_size: 0      # size of context window outside of mentions when pooling
-    include_width: False    # include the inner width of the pooling span as a feature
-    max_r_dist: 100    # max token dist between mentions to automatically prune to NULL. 'infer' figures out from data
+    outer_window_size: 5      # size of context window outside of mentions when pooling
+    include_width: True    # include the inner width of the pooling span as a feature
+    max_r_dist: 'infer'    # max token dist between mentions to automatically prune to NULL. 'infer' figures out from data
   classification_options:
     constraint_mask: True   # whether to automatically apply class compatibility masking
     method: staged     # choose from [staged, mean_field, loopy_bp]

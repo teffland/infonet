@@ -1,3 +1,4 @@
+from time import time
 import numpy as np
 import numpy.random as npr
 import chainer as ch
@@ -5,6 +6,7 @@ import chainer.functions as F
 import chainer.links as L
 
 from tagger import TaggerLoss
+from util import sequences2arrays, convert_sequences
 from special_functions import batch_weighted_softmax_cross_entropy
 from gru import StackedGRU
 from masked_softmax import masked_softmax
@@ -80,6 +82,8 @@ class Extractor(ch.Chain, ReporterMixin):
         if self.mention_pooling == 'attention':
             self.add_link('mention_attn',
                           SimpleAttention(self.mention_feature_size))
+        if opt['include_width']:
+            self.mention_feature_size += 1
 
         # relation representation layers
         self.relation_opt = opt = relation_options
@@ -108,7 +112,8 @@ class Extractor(ch.Chain, ReporterMixin):
             self.add_link('relation_attn',
                           SimpleAttention(self.relation_feature_size))
         self.max_r_dist = opt['max_r_dist']
-
+        if opt['include_width']:
+            self.relation_feature_size += 1
         # classification configuration
         ## how to do classifications
         self.prediction_method = classification_options['method']
@@ -171,50 +176,112 @@ class Extractor(ch.Chain, ReporterMixin):
         if hasattr(self, 'relation_gru'):
             self.relation_gru.rescale_Us()
 
-    def _mention_feature_agg(self, features, span):
+    def _mention_feature_agg(self, features, spans):
+
+        # compute features over whole sets of spans (>= 2x speedup)
+        max_wid = max([s[1]-s[0] for s in spans])
+        # print '{} mention featres, max wid {}'.format(len(spans), max_wid)
+        subfeatures = [ features[s[0]:s[1]] for s in spans ]
+        m_widths = ch.Variable(np.array([s[1]-s[0] for s in spans]).reshape((-1,1)).astype(np.float32))
+        padded, masks = [], []
+        for sf in subfeatures:
+            zeros = ch.Variable(np.zeros((max_wid-sf.shape[0], sf.shape[1])).astype(np.float32))
+            padded.append(F.vstack([sf, zeros]))
+            masks.append(F.vstack([ch.Variable(np.ones_like(sf.data).astype(np.float32)), zeros]))
+        padded_features = F.vstack([F.expand_dims(p,0) for p in padded])
+        masks = F.vstack([F.expand_dims(m,0) for m in masks])
+        # shapes are now [ num mentions x max wid x feature size ]
         if self.mention_pooling == 'sum':
-            mention = F.sum(features[span[0]:span[1]], axis=0)
+            mentions = F.sum(padded_features, axis=1)
         elif self.mention_pooling == 'avg':
-            mention = F.sum(features[span[0]:span[1]], axis=0)
-            mention /= F.broadcast_to(ch.Variable(np.array(span[1]-span[0],
-                                                         dtype=np.float32)),
-                                             mention.shape)
+            mentions = F.sum(padded_features, axis=1)
+            mentions /= F.broadcast_to(m_widths, mentions.shape)
         elif self.mention_pooling == 'max':
-            mention = F.max(features[span[0]:span[1]], axis=0)
+            mentions = F.max(padded_features, axis=1)
         elif self.mention_pooling == 'logsumexp':
-            mention = F.logsumexp(features[span[0]:span[1]], axis=0)
+            raise NotImplementedError, "No masked logsumexp yet"
         elif self.mention_pooling == 'attention':
-            mention = self.mention_attn(features[span[0]:span[1]])
-        else:
-            raise ValueError, "Unknown mention pooling function"
+            raise NotImplementedError, "No masked batch attention yet"
 
         if self.mention_include_width:
-            w = ch.Variable(np.array(span[1]-span[0]).astype(np.float32).reshape((1,)))
-            mention = F.hstack([mention, w])
-        return mention
+            mentions = F.hstack([mentions, m_widths])
+        return mentions
+        # if self.mention_pooling == 'sum':
+        #     mention = F.sum(features[span[0]:span[1]], axis=0)
+        # elif self.mention_pooling == 'avg':
+        #     mention = F.sum(features[span[0]:span[1]], axis=0)
+        #     mention /= F.broadcast_to(ch.Variable(np.array(span[1]-span[0],
+        #                                                  dtype=np.float32)),
+        #                                      mention.shape)
+        # elif self.mention_pooling == 'max':
+        #     mention = F.max(features[span[0]:span[1]], axis=0)
+        # elif self.mention_pooling == 'logsumexp':
+        #     mention = F.logsumexp(features[span[0]:span[1]], axis=0)
+        # elif self.mention_pooling == 'attention':
+        #     mention = self.mention_attn(features[span[0]:span[1]])
+        # else:
+        #     raise ValueError, "Unknown mention pooling function"
+        #
+        # if self.mention_include_width:
+        #     w = ch.Variable(np.array(span[1]-span[0]).astype(np.float32).reshape((1,)))
+        #     mention = F.hstack([mention, w])
+        # return mention
 
-    def _relation_feature_agg(self, features, span):
-        left = max(span[0]-self.relation_outer_window, 0)
-        right = min(span[1]+self.relation_outer_window, features.shape[0])
+    def _relation_feature_agg(self, features, spans):
+        # compute features over whole sets of spans (>= 2x speedup)
+        spans = [ (max(span[0]-self.relation_outer_window, 0),
+                   min(span[3]+self.relation_outer_window, features.shape[0]))
+                  for span in spans ]
+        max_wid = max([s[1]-s[0] for s in spans])
+        # print '{} relation features, max wid {}'.format(len(spans), max_wid)
+        subfeatures = [ features[s[0]:s[1]] for s in spans ]
+
+        r_widths = ch.Variable(np.array([s[1]-s[0] for s in spans]).reshape((-1,1)).astype(np.float32))
+        padded, masks = [], []
+        for sf in subfeatures:
+            zeros = ch.Variable(np.zeros((max_wid-sf.shape[0], sf.shape[1])).astype(np.float32))
+            padded.append(F.vstack([sf, zeros]))
+            masks.append(F.vstack([ch.Variable(np.ones_like(sf.data).astype(np.float32)), zeros]))
+        padded_features = F.vstack([F.expand_dims(p,0) for p in padded])
+        masks = F.vstack([F.expand_dims(m,0) for m in masks])
+
+        # shapes are now [ num relations x max wid x feature size ]
         if self.relation_pooling == 'sum':
-            relation = F.sum(features[left:right], axis=0)
+            relations = F.sum(padded_features, axis=1)
         elif self.relation_pooling == 'avg':
-            relation = F.sum(features[left:right], axis=0)
-            relation /= F.broadcast_to(ch.Variable(np.array(right-left,
-                                                         dtype=np.float32)),
-                                             relation.shape)
+            relations = F.sum(padded_features, axis=1)
+            relations /= F.broadcast_to(r_widths, relations.shape)
         elif self.relation_pooling == 'max':
-            relation = F.max(features[left:right], axis=0)
+            relations = F.max(padded_features, axis=1)
         elif self.relation_pooling == 'logsumexp':
-            relation = F.logsumexp(features[left:right], axis=0)
+            raise NotImplementedError, "No masked logsumexp yet"
         elif self.relation_pooling == 'attention':
-            relation = self.relation_attn(features[left:right])
-        else:
-            raise ValueError, "Unknown relation pooling function"
-        if self.mention_include_width:
-            w = ch.Variable(np.array(span[1]-span[0]).astype(np.float32).reshape((1,)))
-            relation = F.hstack([relation, w])
-        return relation
+            raise NotImplementedError, "No masked batch attention yet"
+
+        if self.relation_include_width:
+            relations = F.hstack([relations, r_widths])
+        return relations
+        # left = max(span[0]-self.relation_outer_window, 0)
+        # right = min(span[1]+self.relation_outer_window, features.shape[0])
+        # if self.relation_pooling == 'sum':
+        #     relation = F.sum(features[left:right], axis=0)
+        # elif self.relation_pooling == 'avg':
+        #     relation = F.sum(features[left:right], axis=0)
+        #     relation /= F.broadcast_to(ch.Variable(np.array(right-left,
+        #                                                  dtype=np.float32)),
+        #                                      relation.shape)
+        # elif self.relation_pooling == 'max':
+        #     relation = F.max(features[left:right], axis=0)
+        # elif self.relation_pooling == 'logsumexp':
+        #     relation = F.logsumexp(features[left:right], axis=0)
+        # elif self.relation_pooling == 'attention':
+        #     relation = self.relation_attn(features[left:right])
+        # else:
+        #     raise ValueError, "Unknown relation pooling function"
+        # if self.mention_include_width:
+        #     w = ch.Variable(np.array(span[1]-span[0]).astype(np.float32).reshape((1,)))
+        #     relation = F.hstack([relation, w])
+        # return relation
 
     def _extract_graph(self, sequence_tags, mention_features, relation_features):
         """ Subroutine responsible for extracting the graph and graph features
@@ -253,11 +320,12 @@ class Extractor(ch.Chain, ReporterMixin):
         # extract graph and features for each doc
         zipped = zip(all_boundaries, mention_features, relation_features)
         for s, (boundaries, men_features, rel_features) in enumerate(zipped):
-            mentions = []
+            t0 = time()
+            # mentions = []
             mention_spans = []
             mention_masks = []
             mention_nbrs = []
-            relations = []
+            # relations = []
             relation_left_nbrs = []
             relation_right_nbrs = []
             relation_spans = []
@@ -265,8 +333,8 @@ class Extractor(ch.Chain, ReporterMixin):
 
             # print '{} mentions'.format(len(boundaries))
             for i, b in enumerate(boundaries):
-                mention = self._mention_feature_agg(men_features, b)
-                mentions.append(mention)
+                # mention = self._mention_feature_agg(men_features, b)
+                # mentions.append(mention)
                 mention_spans.append((b[0], b[1]))
                 mention_masks.append(self.mtype2msubtype[b[2]])
                 # make a relation to all previous mentions (M choose 2)
@@ -274,10 +342,10 @@ class Extractor(ch.Chain, ReporterMixin):
                 mention_nbrs.append([])
                 for j in range(i):
                     bj = boundaries[j]
-                    if bj[1] - b[0] < self.max_r_dist:
+                    if b[0] - bj[1] < self.max_r_dist:
                         relation_spans.append((bj[0], bj[1], b[0], b[1]))
-                        relation = self._relation_feature_agg(rel_features, (bj[0], b[1]))
-                        relations.append(relation)
+                        # relation = self._relation_feature_agg(rel_features, (bj[0], b[1]))
+                        # relations.append(relation)
                         # for each relation, keep track of its neighboring mentions
                         relation_left_nbrs.append(j)
                         relation_right_nbrs.append(i)
@@ -290,11 +358,12 @@ class Extractor(ch.Chain, ReporterMixin):
                     else:
                         null_rel_spans.append((bj[0], bj[1], b[0], b[1]))
 
+
             # rearrange mentions in order from most to least neighboring relations
             # needed for efficient inference in bipartite crf
             sort_idxs = [x[0] for x in sorted(zip(range(len(mention_nbrs)), mention_nbrs),
                                               key=lambda x:len(x[1]), reverse=True)]
-            mentions = [ mentions[i] for i in sort_idxs]
+            # mentions = [ mentions[i] for i in sort_idxs]
             mention_nbrs = [ mention_nbrs[i] for i in sort_idxs ]
             mention_masks = [ mention_masks[i] for i in sort_idxs ]
             mention_spans = [ mention_spans[i] for i in sort_idxs ]
@@ -304,7 +373,9 @@ class Extractor(ch.Chain, ReporterMixin):
                                   for rm_i in relation_right_nbrs ]
 
             # convert list of mentions to matrix and append
-            mentions = F.vstack(mentions)
+            # mentions = F.vstack(mentions)
+
+            mentions = self._mention_feature_agg(men_features, mention_spans)
             mention_masks = F.vstack(mention_masks)
             all_mentions.append(mentions)
             all_mention_masks.append(mention_masks)
@@ -312,7 +383,9 @@ class Extractor(ch.Chain, ReporterMixin):
             all_mention_nbrs.append(mention_nbrs)
 
             # same for relations
-            relations = F.vstack(relations)
+            # relations = F.vstack(relations)
+            # print 'relation features'
+            relations = self._relation_feature_agg(rel_features, relation_spans)
             relation_left_nbrs = F.vstack(relation_left_nbrs)
             relation_right_nbrs = F.vstack(relation_right_nbrs)
             all_relations.append(relations)
@@ -320,7 +393,8 @@ class Extractor(ch.Chain, ReporterMixin):
             all_relation_right_nbrs.append(relation_right_nbrs)
             all_relation_spans.append(relation_spans)
             all_null_rel_spans.append(null_rel_spans)
-
+            print '{} sec for {} mentions and {} relations'.format(
+             time()-t0, len(mention_spans), len(relation_spans))
         return (all_mentions, all_mention_masks, all_mention_nbrs,
                 all_relations, all_relation_left_nbrs, all_relation_right_nbrs,
                 all_mention_spans, all_relation_spans, all_null_rel_spans)
@@ -328,7 +402,7 @@ class Extractor(ch.Chain, ReporterMixin):
     def __call__(self, x_list, p_list, *_, **kwds):
         train = kwds.pop('train', True)
         gold_boundaries = kwds.pop('gold_boundaries', None)
-
+        # print 'tagger'
         # get features and prediction from tagger, depending on configuration
         if not gold_boundaries:
             sequence_tags = self.tagger.predict(x_list, p_list,
@@ -343,7 +417,7 @@ class Extractor(ch.Chain, ReporterMixin):
             else:
                 features = self.tagger.embeds
         else:
-            sequence_tags = gold_boundaries
+            sequence_tags = sequences2arrays(gold_boundaries)
             if self.build_on_tagger_features:
                 features = self.tagger(x_list, p_list, train=train)
                 if not self.backprop_to_tagger:
@@ -352,7 +426,7 @@ class Extractor(ch.Chain, ReporterMixin):
                         feature.unchain_backward()
             else:
                 features = self.tagger.embed(x_list, p_list, train=train)
-
+        # print 'features'
         # run shared feature layers
         if hasattr(self, 'shared_gru'):
             features = self.shared_gru(features, train=train)
@@ -380,12 +454,13 @@ class Extractor(ch.Chain, ReporterMixin):
                 relation_features[i] = F.dropout(activation(mlp(relation_features[i])), dropout, train)
 
         # extract the information graph and its features
+        # print 'extracting graph...'
         (mentions, mention_masks, mention_nbrs,
          relations, relation_left_nbrs, relation_right_nbrs,
          m_spans, r_spans, null_r_spans) = self._extract_graph(sequence_tags,
                                                                mention_features,
                                                                relation_features)
-
+        # print 'classifying'
         # now do classification scoring
         if self.prediction_method == 'staged':
             # score mentions and take predictions for relations
@@ -452,7 +527,7 @@ class ExtractorLoss(ch.Chain):
         self.use_gold_boundaries = use_gold_boundaries
     def __call__(self, x_list, p_list, gold_b_list, gold_m_list, gold_r_list, *_,
                  **kwds):
-        b_loss = kwds.pop('b_loss', True)
+        b_loss = kwds.pop('b_loss', False)
         m_loss = kwds.pop('m_loss', True)
         r_loss = kwds.pop('r_loss', True)
         reweight_relations = kwds.pop('reweight_relations', False)
@@ -552,10 +627,10 @@ class ExtractorLoss(ch.Chain):
                 relation_loss += doc_relation_loss
             relation_loss /= batch_size
 
-        print "Extract Loss: B:{0:2.4f}, M:{1:2.4f}, R:{2:2.4f}".format(
-            np.asscalar(boundary_loss.data),
-            np.asscalar(mention_loss.data),
-            np.asscalar(relation_loss.data))
+        # print "Extract Loss: B:{0:2.4f}, M:{1:2.4f}, R:{2:2.4f}".format(
+        #     np.asscalar(boundary_loss.data),
+        #     np.asscalar(mention_loss.data),
+        #     np.asscalar(relation_loss.data))
 
         loss = 0
         if b_loss:
