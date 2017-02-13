@@ -3,7 +3,7 @@ tagger: /Users/thomaseffland/Development/infonet/experiments/tagger_Feb-02-2017-
 # TODO: Allow an 'infer best' option that automatically picks best tagger
 
 train:
-  n_epoch: 1
+  n_epoch: 100
   batch_size: 50
   patience: 20
 
@@ -30,19 +30,19 @@ extractor:
     bidirectional: True
     gru_dropouts: [ ]      # dropouts on outputs of gru
     gru_hdropouts: [ ]     # horizontal dropouts on gru (overrides gru_dropouts if > 0)
-    mlp_sizes: [ 100 ]            # hidden layer sizes
+    mlp_sizes: [ 50 ]            # hidden layer sizes
     mlp_activations: [ leaky_relu ]      # eg, sigmoid or leaky_relu
-    mlp_dropouts: [ .5 ]         # dropout for mlp layers
+    mlp_dropouts: [ .25 ]         # dropout for mlp layers
     pooling: avg               # choose from [sum, avg, max, logsumexp, attention]
-    include_width: False    # include the width of the pooling span as a feature
+    include_width: True    # include the width of the pooling span as a feature
   relation_options:
     gru_state_sizes: [ ]  # more than one creates stacked grus
     bidirectional: True
     gru_dropouts: [  ]      # dropouts on outputs of gru
     gru_hdropouts: [  ]     # horizontal dropouts on gru (overrides gru_dropouts if > 0)
-    mlp_sizes: [ 100 ]            # hidden layer sizes
+    mlp_sizes: [ 50 ]            # hidden layer sizes
     mlp_activations: [ leaky_relu ]      # eg, sigmoid or leaky_relu
-    mlp_dropouts: [ .5 ]         # dropout for mlp layers
+    mlp_dropouts: [ .25 ]         # dropout for mlp layers
     pooling: avg               # choose from [sum, avg, max, logsumexp, attention]
     outer_window_size: 5      # size of context window outside of mentions when pooling
     include_width: True    # include the inner width of the pooling span as a feature

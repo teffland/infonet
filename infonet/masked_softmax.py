@@ -42,7 +42,7 @@ class MaskedSoftmax(function.Function):
         x, mask = inputs
         y = x - x.max(axis=1, keepdims=True)
         self.y = np.exp(y) * mask
-        self.y /= self.y.sum(axis=1, keepdims=True)
+        self.y /= self.y.sum(axis=1, keepdims=True) + 1e-15
 
         return self.y,
 

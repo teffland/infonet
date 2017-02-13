@@ -1,4 +1,7 @@
 from time import time
+from io import open
+import json
+
 import numpy as np
 import numpy.random as npr
 import chainer as ch
@@ -29,6 +32,11 @@ class Extractor(ch.Chain, ReporterMixin):
                  msubtype2rtype,
                  **kwds):
         ch.Chain.__init__(self)
+        self.n_mention_class = n_mention_class
+        self.n_relation_class = n_relation_class
+        self.null_idx = null_idx
+        self.cored_idx = coref_idx
+
         # tagger composition options
         self.add_link('tagger', tagger.copy())
         self.build_on_tagger_features = build_on_tagger_features
@@ -73,7 +81,7 @@ class Extractor(ch.Chain, ReporterMixin):
         self.mention_mlps = []
         for i, hidden_dim in enumerate(opt['mlp_sizes']):
             mlp = L.Linear(self.mention_feature_size, hidden_dim)
-            self.shared_mlps.append(mlp)
+            self.mention_mlps.append(mlp)
             self.add_link('mention_mlp_{}'.format(i), mlp)
             self.mention_feature_size = hidden_dim
         ## feature pooling
@@ -101,7 +109,7 @@ class Extractor(ch.Chain, ReporterMixin):
         self.relation_mlps = []
         for i, hidden_dim in enumerate(opt['mlp_sizes']):
             mlp = L.Linear(self.relation_feature_size, hidden_dim)
-            self.shared_mlps.append(mlp)
+            self.relation_mlps.append(mlp)
             self.add_link('relation_mlp_{}'.format(i), mlp)
             self.relation_feature_size = hidden_dim
         ## feature pooling
@@ -114,6 +122,7 @@ class Extractor(ch.Chain, ReporterMixin):
         self.max_r_dist = opt['max_r_dist']
         if opt['include_width']:
             self.relation_feature_size += 1
+
         # classification configuration
         ## how to do classifications
         self.prediction_method = classification_options['method']
@@ -393,8 +402,8 @@ class Extractor(ch.Chain, ReporterMixin):
             all_relation_right_nbrs.append(relation_right_nbrs)
             all_relation_spans.append(relation_spans)
             all_null_rel_spans.append(null_rel_spans)
-            print '{} sec for {} mentions and {} relations'.format(
-             time()-t0, len(mention_spans), len(relation_spans))
+            # print '{} sec for {} mentions and {} relations'.format(
+            #  time()-t0, len(mention_spans), len(relation_spans))
         return (all_mentions, all_mention_masks, all_mention_nbrs,
                 all_relations, all_relation_left_nbrs, all_relation_right_nbrs,
                 all_mention_spans, all_relation_spans, all_null_rel_spans)
@@ -436,7 +445,7 @@ class Extractor(ch.Chain, ReporterMixin):
                 features[i] = F.dropout(activation(mlp(features[i])), dropout, train)
 
         # run mention feature layers
-        mention_features = features
+        mention_features = [F.identity(feature) for feature in features]
         if hasattr(self, 'mention_gru'):
             mention_features = self.mention_gru(mention_features, train=train)
         zipped_mlp = zip(self.mention_mlp_dropouts, self.mention_activations, self.mention_mlps)
@@ -445,7 +454,7 @@ class Extractor(ch.Chain, ReporterMixin):
                 mention_features[i] = F.dropout(activation(mlp(mention_features[i])), dropout, train)
 
         # run relation feature layers
-        relation_features = features
+        relation_features = [F.identity(feature) for feature in features]
         if hasattr(self, 'relation_gru'):
             relation_features = self.relation_gru(relation_features, train=train)
         zipped_mlp = zip(self.relation_mlp_dropouts, self.relation_activations, self.relation_mlps)
@@ -670,8 +679,8 @@ class ExtractorEvaluator():
     def evaluate(self, batch_iter, save_prefix=None):
         all_xs, all_truexs = [], []
         all_bpreds, all_bs = [], []
-        all_mpreds, all_ms = []
-        all_rpreds, all_rs = []
+        all_mpreds, all_ms = [], []
+        all_rpreds, all_rs = [], []
         all_ps = []
         all_fs = []
 
@@ -709,7 +718,7 @@ class ExtractorEvaluator():
                 self.save_doc(fname, xs, ps, bs, ms, rs)
             print "Done"
 
-        stats = mention_relation_stats(all_ms, all_mpreds, all_res, all_rpreds)
+        stats = mention_relation_stats(all_ms, all_mpreds, all_rs, all_rpreds)
         stats.update({'boundary-'+k:v for k,v in
                          mention_boundary_stats(all_bs, all_bpreds,
                                                 self.extractor.tagger, **self.tag_map).items()})

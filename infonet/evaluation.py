@@ -188,8 +188,6 @@ def mention_relation_stats(m_trues, m_preds, r_trues, r_preds):
         stats['edge'] = {'tp':0, 'fp':0, 'fn':0}
         stats['relation'] = {'tp':0, 'fp':0, 'fn':0}
         stats['event-argument'] = {'tp':0, 'fp':0, 'fn':0}
-        stats['coreference'] = {'tp':0, 'fp':0, 'fn':0}
-        stats['NULL'] = {'tp':0, 'fp':0, 'fn':0}
         # nodes
         for m_pred, m_true in zip(m_preds, m_trues):
             m_pred = set(m_pred)
