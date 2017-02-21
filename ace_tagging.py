@@ -2,6 +2,7 @@ import os
 import argparse
 import yaml
 from datetime import datetime
+from pprint import pprint
 
 import numpy as np
 import numpy.random as npr
