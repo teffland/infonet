@@ -1,0 +1,64 @@
+experiment_dir: /home/teffland/infonet/experiments/
+tagger: /home.teffland/infonet/experiments/tagger_Feb-02-2017-12:26:12053/
+# TODO: Allow an 'infer best' option that automatically picks best tagger
+
+train:
+  n_epoch: 149
+  batch_size: 50
+  patience: 50
+  boundary_wait: 0
+  boundary_n_epoch: 0
+  mention_wait: 0
+  mention_n_epoch: 150
+  relation_wait: 50
+  relation_n_epoch: 100
+
+optimizer:
+  type: Adam
+  learning_rate: .01
+  weight_decay: 0.0
+  grad_clip: 10.
+
+extractor:
+  use_gold_boundaries: True
+  build_on_tagger_features: False
+  backprop_to_tagger: False
+  shared_options:
+    gru_state_sizes: [ ]  # more than one creates stacked grus
+    bidirectional: True
+    gru_dropouts: [  ]      # dropouts on outputs of gru
+    gru_hdropouts: [ ]     # horizontal dropouts on gru (overrides gru_dropouts if > 0)
+    mlp_sizes: [  ]            # hidden layer sizes
+    mlp_activations: [  ]      # eg, sigmoid or leaky_relu
+    mlp_dropouts: [  ]         # dropout for mlp layers
+  mention_options:
+    gru_state_sizes: [ ]  # more than one creates stacked grus
+    bidirectional: True
+    gru_dropouts: [ ]      # dropouts on outputs of gru
+    gru_hdropouts: [ ]     # horizontal dropouts on gru (overrides gru_dropouts if > 0)
+    mlp_sizes: [ 200 ]            # hidden layer sizes
+    mlp_activations: [ leaky_relu ]      # eg, sigmoid or leaky_relu
+    mlp_dropouts: [ .5 ]         # dropout for mlp layers
+    pooling: attention               # choose from [sum, avg, max, logsumexp, attention]
+    include_width: True    # include the width of the pooling span as a feature
+  relation_options:
+    position_size: 50      # dimension for relative position embedding
+    conv_n_grams: [2, 3, 4, 5]
+    conv_n_filters: 150
+    conv_activation: leaky_relu
+    gru_state_sizes: [  ]  # more than one creates stacked grus
+    bidirectional: True
+    gru_dropouts: [  ]      # dropouts on outputs of gru
+    gru_hdropouts: [ ]     # horizontal dropouts on gru (overrides gru_dropouts if > 0)
+    mlp_sizes: [ 200 ]            # hidden layer sizes
+    mlp_activations: [ leaky_relu ]      # eg, sigmoid or leaky_relu
+    mlp_dropouts: [ .5 ]         # dropout for mlp layers
+    pooling: max               # choose from [sum, avg, max, logsumexp, attention]
+    outer_window_size: 3      # size of context window outside of mentions when pooling
+    include_width: True    # include the inner width of the pooling span as a feature
+    final_dropout: .5
+    max_r_dist: 20    # max token dist between mentions to automatically prune to NULL. 'infer' figures out from data
+    reweight: False
+  classification_options:
+    constraint_mask: True   # whether to automatically apply class compatibility masking
+    method: staged     # choose from [staged, mean_field, loopy_bp]
