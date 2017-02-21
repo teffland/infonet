@@ -60,5 +60,5 @@ extractor:
     max_r_dist: 20    # max token dist between mentions to automatically prune to NULL. 'infer' figures out from data
     reweight: False
   classification_options:
-    constraint_mask: True   # whether to automatically apply class compatibility masking
+    constraint_mask: False   # whether to automatically apply class compatibility masking
     method: staged     # choose from [staged, mean_field, loopy_bp]
