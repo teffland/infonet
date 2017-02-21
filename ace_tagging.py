@@ -106,8 +106,10 @@ if __name__ == '__main__':
         tagger_name = args.eval
 
     else:
-        tagger_name = 'tagger_'+datetime.strftime(datetime.now(), '%b-%m-%Y-%H:%M:%f')
+        tagger_name = 'tagger_'+datetime.strftime(datetime.now(), '%b-%d-%Y-%H:%M:%f')
 
+    print "Config: "
+    pprint(config)
     save_prefix = config['experiment_dir']+tagger_name+'/'
     if not os.path.exists(save_prefix):
         os.makedirs(save_prefix)

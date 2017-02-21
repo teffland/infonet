@@ -106,8 +106,6 @@ if __name__ == '__main__':
     # read input args
     args = parse_args()
     config = yaml.load(open(args.config_file))
-    print "Config: "
-    pprint(config)
     tagger_config = yaml.load(open(os.path.join(config['tagger'], 'config.yaml')))
     if args.eval:
         config = yaml.load(open(config['experiment_dir']+args.eval+'/config.yaml'))
@@ -115,8 +113,9 @@ if __name__ == '__main__':
         extractor_name = args.eval
 
     else:
-        extractor_name = 'extractor_'+datetime.strftime(datetime.now(), '%b-%m-%Y-%H:%M:%f')
-
+        extractor_name = 'extractor_'+datetime.strftime(datetime.now(), '%b-%d-%Y-%H:%M:%f')
+    print "Config: "
+    pprint(config)
     save_prefix = config['experiment_dir']+extractor_name+'/'
     if not os.path.exists(save_prefix):
         os.makedirs(save_prefix)

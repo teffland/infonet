@@ -1,5 +1,5 @@
-experiment_dir: /Users/thomaseffland/Development/infonet/experiments/
-tagger: /Users/thomaseffland/Development/infonet/experiments/tagger_Feb-02-2017-18:24:207917/
+experiment_dir: /home/teffland/infonet/experiments/
+tagger: /home.teffland/infonet/experiments/tagger_Feb-02-2017-12:26:12053/
 # TODO: Allow an 'infer best' option that automatically picks best tagger
 
 train:

@@ -840,7 +840,7 @@ class ExtractorEvaluator():
         stats.update({'boundary-'+k:v for k,v in
                          mention_boundary_stats(all_bs, all_bpreds,
                                                 self.extractor.tagger, **self.tag_map).items()})
-        stats['score'] = stats['f1']
+        stats['score'] = stats['important']['f1']
         return stats
 
     def save_doc(self, fname, xs, ps, bs, ms, rs):
