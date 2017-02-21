@@ -91,7 +91,8 @@ def mention_boundary_stats(true_ys, pred_ys, tagger, **kwds):
                     stats['event-anchor']['fp'] += s[t]['fp']
                     stats['event-anchor']['fn'] += s[t]['fn']
                 else:
-                    print "invalid b type found {}".format(t)
+                    pass
+                    # print "invalid b type found {}".format(t)
     stats['precision'] = stats['tp'] / float(stats['tp'] + stats['fp'] +1e-15)
     stats['recall'] = stats['tp'] / float(stats['tp'] + stats['fn'] +1e-15)
     stats['f1'] = 2*stats['precision']*stats['recall']/(stats['precision']+stats['recall']+1e-15)
@@ -104,81 +105,81 @@ def mention_boundary_stats(true_ys, pred_ys, tagger, **kwds):
         stats[t]['support'] = stats[t]['tp'] + stats[t]['fp'] + stats[t]['fn']
     return stats
 
-def mention_stats(m_preds, m_trues):
-    stats = {'tp':0, 'fp':0, 'fn':0}
-    stats['entity'] = {'tp':0, 'fp':0, 'fn':0}
-    stats['event-anchor'] = {'tp':0, 'fp':0, 'fn':0}
-    for m_pred, m_true in zip(m_preds, m_trues):
-        m_pred = set(m_pred)
-        m_true = set(m_true)
-        tp = m_pred & m_true
-        fp = m_pred - m_true
-        fn = m_true - m_pred
-
-        for m in tp:
-            msubtype = m[2]
-            # print 'tp msubstype:', msubtype
-            if msubtype not in stats:
-                stats[msubtype] = {'tp':0, 'fp':0, 'fn':0}
-            stats[msubtype]['tp'] += 1
-            # stats by node-type
-            if 'entity' in msubtype:
-                # print 'tp entity'
-                stats['entity']['tp'] += 1
-            elif 'event-anchor' in msubtype:
-                # print 'tp event-anchor'
-                stats['event-anchor']['tp'] += 1
-            else:
-                print "invalid m type found {}".format(msubtype)
-        for m in fp:
-            msubtype = m[2]
-            # print 'fp msubstype:', msubtype
-            if msubtype not in stats:
-                stats[msubtype] = {'tp':0, 'fp':0, 'fn':0}
-            stats[msubtype]['fp'] += 1
-            # stats by node-type
-            if 'entity' in msubtype:
-                # print 'fp entity'
-                stats['entity']['fp'] += 1
-            elif 'event-anchor' in msubtype:
-                # print 'fp event-anchor'
-                stats['event-anchor']['fp'] += 1
-            else:
-                print "invalid m type found {}".format(msubtype)
-        for m in fn:
-            msubtype = m[2]
-            # print 'fn msubstype:', msubtype
-            if msubtype not in stats:
-                stats[msubtype] = {'tp':0, 'fp':0, 'fn':0}
-            stats[msubtype]['fn'] += 1
-            # stats by node-type
-            if 'entity' in msubtype:
-                # print 'fn entity'
-                stats['entity']['fn'] += 1
-            elif 'event-anchor' in msubtype:
-                # print 'fn event-anchor'
-                stats['event-anchor']['fn'] += 1
-            else:
-                print "invalid m type found {}".format(msubtype)
-
-        # tp, fp, fn regardless of type
-        stats['tp'] += len(tp)
-        stats['fp'] += len(fp)
-        stats['fn'] += len(fn)
-    # micro stats for all
-    stats['precision'] = stats['tp'] / float(stats['tp'] + stats['fp'] + 1e-15)
-    stats['recall'] = stats['tp'] / float(stats['tp'] + stats['fn'] + 1e-15)
-    stats['f1'] = 2*stats['precision']*stats['recall']/(stats['precision']+stats['recall']+1e-15)
-    stats['support'] = stats['tp'] + stats['fp'] + stats['fn']
-    # micro stats by type
-    for t, s in stats.items():
-        if type(s) is dict:
-            stats[t]['precision'] = s['tp'] / float(s['tp'] + s['fp'] + 1e-15)
-            stats[t]['recall'] = s['tp'] / float(s['tp'] + s['fn'] + 1e-15)
-            stats[t]['f1'] = (2.*stats[t]['precision']*stats[t]['recall']/
-                             (stats[t]['precision']+stats[t]['recall']+1e-15))
-            stats[t]['support'] = s['tp'] + s['fp'] + s['fn']
-    return stats
+# def mention_stats(m_preds, m_trues):
+#     stats = {'tp':0, 'fp':0, 'fn':0}
+#     stats['entity'] = {'tp':0, 'fp':0, 'fn':0}
+#     stats['event-anchor'] = {'tp':0, 'fp':0, 'fn':0}
+#     for m_pred, m_true in zip(m_preds, m_trues):
+#         m_pred = set(m_pred)
+#         m_true = set(m_true)
+#         tp = m_pred & m_true
+#         fp = m_pred - m_true
+#         fn = m_true - m_pred
+#
+#         for m in tp:
+#             msubtype = m[2]
+#             # print 'tp msubstype:', msubtype
+#             if msubtype not in stats:
+#                 stats[msubtype] = {'tp':0, 'fp':0, 'fn':0}
+#             stats[msubtype]['tp'] += 1
+#             # stats by node-type
+#             if 'entity' in msubtype:
+#                 # print 'tp entity'
+#                 stats['entity']['tp'] += 1
+#             elif 'event-anchor' in msubtype:
+#                 # print 'tp event-anchor'
+#                 stats['event-anchor']['tp'] += 1
+#             else:
+#                 print "invalid m type found {}".format(msubtype)
+#         for m in fp:
+#             msubtype = m[2]
+#             # print 'fp msubstype:', msubtype
+#             if msubtype not in stats:
+#                 stats[msubtype] = {'tp':0, 'fp':0, 'fn':0}
+#             stats[msubtype]['fp'] += 1
+#             # stats by node-type
+#             if 'entity' in msubtype:
+#                 # print 'fp entity'
+#                 stats['entity']['fp'] += 1
+#             elif 'event-anchor' in msubtype:
+#                 # print 'fp event-anchor'
+#                 stats['event-anchor']['fp'] += 1
+#             else:
+#                 print "invalid m type found {}".format(msubtype)
+#         for m in fn:
+#             msubtype = m[2]
+#             # print 'fn msubstype:', msubtype
+#             if msubtype not in stats:
+#                 stats[msubtype] = {'tp':0, 'fp':0, 'fn':0}
+#             stats[msubtype]['fn'] += 1
+#             # stats by node-type
+#             if 'entity' in msubtype:
+#                 # print 'fn entity'
+#                 stats['entity']['fn'] += 1
+#             elif 'event-anchor' in msubtype:
+#                 # print 'fn event-anchor'
+#                 stats['event-anchor']['fn'] += 1
+#             else:
+#                 print "invalid m type found {}".format(msubtype)
+#
+#         # tp, fp, fn regardless of type
+#         stats['tp'] += len(tp)
+#         stats['fp'] += len(fp)
+#         stats['fn'] += len(fn)
+#     # micro stats for all
+#     stats['precision'] = stats['tp'] / float(stats['tp'] + stats['fp'] + 1e-15)
+#     stats['recall'] = stats['tp'] / float(stats['tp'] + stats['fn'] + 1e-15)
+#     stats['f1'] = 2*stats['precision']*stats['recall']/(stats['precision']+stats['recall']+1e-15)
+#     stats['support'] = stats['tp'] + stats['fp'] + stats['fn']
+#     # micro stats by type
+#     for t, s in stats.items():
+#         if type(s) is dict:
+#             stats[t]['precision'] = s['tp'] / float(s['tp'] + s['fp'] + 1e-15)
+#             stats[t]['recall'] = s['tp'] / float(s['tp'] + s['fn'] + 1e-15)
+#             stats[t]['f1'] = (2.*stats[t]['precision']*stats[t]['recall']/
+#                              (stats[t]['precision']+stats[t]['recall']+1e-15))
+#             stats[t]['support'] = s['tp'] + s['fp'] + s['fn']
+#     return stats
 
 def mention_relation_stats(m_trues, m_preds, r_trues, r_preds,
                            max_r_dist=1000):
@@ -190,6 +191,7 @@ def mention_relation_stats(m_trues, m_preds, r_trues, r_preds,
         stats['edge_under'] = {'tp':0, 'fp':0, 'fn':0}
         stats['relation'] = {'tp':0, 'fp':0, 'fn':0}
         stats['event-argument'] = {'tp':0, 'fp':0, 'fn':0}
+        stats['important'] = {'tp':0, 'fp':0, 'fn':0}
         # nodes
         for m_pred, m_true in zip(m_preds, m_trues):
             m_pred = set(m_pred)
@@ -360,6 +362,10 @@ def mention_relation_stats(m_trues, m_preds, r_trues, r_preds,
             stats['edge_over']['tp'] += len(tp) - len(under_tp)
             stats['edge_over']['fp'] += len(fp) - len(under_fp)
             stats['edge_over']['fn'] += len(fn) - len(under_fn)
+        # keep track of what actually matters
+        for k in ('tp', 'fp', 'fn'):
+            stats['important'][k] = ( stats['entity'][k] + stats['event-anchor'][k]
+                                    + stats['relation'][k] + stats['event-argument'][k])
         # micro stats for all
         stats['precision'] = stats['tp'] / float(stats['tp'] + stats['fp'] + 1e-15)
         stats['recall'] = stats['tp'] / float(stats['tp'] + stats['fn'] + 1e-15)
