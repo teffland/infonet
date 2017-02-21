@@ -3,19 +3,19 @@ tagger: /Users/thomaseffland/Development/infonet/experiments/tagger_Feb-02-2017-
 # TODO: Allow an 'infer best' option that automatically picks best tagger
 
 train:
-  n_epoch: 99
+  n_epoch: 149
   batch_size: 50
   patience: 50
   boundary_wait: 0
   boundary_n_epoch: 0
   mention_wait: 0
-  mention_n_epoch: 100
-  relation_wait: 0
+  mention_n_epoch: 150
+  relation_wait: 50
   relation_n_epoch: 100
 
 optimizer:
   type: Adam
-  learning_rate: .005
+  learning_rate: .01
   weight_decay: 0.0
   grad_clip: 10.
 
@@ -37,21 +37,21 @@ extractor:
     gru_dropouts: [ ]      # dropouts on outputs of gru
     gru_hdropouts: [ ]     # horizontal dropouts on gru (overrides gru_dropouts if > 0)
     mlp_sizes: [ 200 ]            # hidden layer sizes
-    mlp_activations: [ relu ]      # eg, sigmoid or leaky_relu
+    mlp_activations: [ leaky_relu ]      # eg, sigmoid or leaky_relu
     mlp_dropouts: [ .5 ]         # dropout for mlp layers
     pooling: attention               # choose from [sum, avg, max, logsumexp, attention]
     include_width: True    # include the width of the pooling span as a feature
   relation_options:
-    position_size: 25      # dimension for relative position embedding
-    conv_n_grams: [2, 3, 4]
-    conv_n_filters: 50
-    conv_activation: relu
+    position_size: 50      # dimension for relative position embedding
+    conv_n_grams: [2, 3, 4, 5]
+    conv_n_filters: 150
+    conv_activation: leaky_relu
     gru_state_sizes: [  ]  # more than one creates stacked grus
     bidirectional: True
     gru_dropouts: [  ]      # dropouts on outputs of gru
     gru_hdropouts: [ ]     # horizontal dropouts on gru (overrides gru_dropouts if > 0)
     mlp_sizes: [ 200 ]            # hidden layer sizes
-    mlp_activations: [ relu ]      # eg, sigmoid or leaky_relu
+    mlp_activations: [ leaky_relu ]      # eg, sigmoid or leaky_relu
     mlp_dropouts: [ .5 ]         # dropout for mlp layers
     pooling: max               # choose from [sum, avg, max, logsumexp, attention]
     outer_window_size: 3      # size of context window outside of mentions when pooling
@@ -60,5 +60,5 @@ extractor:
     max_r_dist: 20    # max token dist between mentions to automatically prune to NULL. 'infer' figures out from data
     reweight: False
   classification_options:
-    constraint_mask: False   # whether to automatically apply class compatibility masking
+    constraint_mask: True   # whether to automatically apply class compatibility masking
     method: staged     # choose from [staged, mean_field, loopy_bp]
