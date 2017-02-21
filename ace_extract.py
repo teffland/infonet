@@ -114,7 +114,9 @@ if __name__ == '__main__':
 
     else:
         extractor_name = 'extractor_'+datetime.strftime(datetime.now(), '%b-%d-%Y-%H:%M:%f')
-    print "Config: "
+    print "Tagger Config: "
+    pprint(tagger_config)
+    print "Extractor Config: "
     pprint(config)
     save_prefix = config['experiment_dir']+extractor_name+'/'
     if not os.path.exists(save_prefix):
