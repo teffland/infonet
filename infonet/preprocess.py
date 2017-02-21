@@ -421,20 +421,20 @@ def get_ace_extraction_data(count=0,
 
     if v > 1:
         print "POS vocab:"
-        for i, v in pos_vocab._idx2vocab.items():
-            print '\t{}:: {}'.format(i,v)
+        for i, vocab in pos_vocab._idx2vocab.items():
+            print '\t{}:: {}'.format(i,vocab)
 
         print "Boundary vocab:"
-        for i, v in boundary_vocab._idx2vocab.items():
-            print '\t{}:: {}'.format(i,v)
+        for i, vocab in boundary_vocab._idx2vocab.items():
+            print '\t{}:: {}'.format(i,vocab)
 
         print "Mention vocab:"
-        for i, v in mention_vocab._idx2vocab.items():
-            print '\t{}:: {}'.format(i,v)
+        for i, vocab in mention_vocab._idx2vocab.items():
+            print '\t{}:: {}'.format(i,vocab)
         #
         print "Relation vocab:"
-        for i, v in relation_vocab._idx2vocab.items():
-            print '\t{}:: {}'.format(i,v)
+        for i, vocab in relation_vocab._idx2vocab.items():
+            print '\t{}:: {}'.format(i,vocab)
     if v > 2:
         print "Tags to Mention types:"
         for t, m in tag_map['tag2mtype'].items():
@@ -449,8 +449,8 @@ def get_ace_extraction_data(count=0,
         print "Mention subtypes to relations:"
         for m, s in msubtype2rtype.items():
             print '\t{}:'.format(m)
-            for t, v in s.items():
-                print '\t  {}:: {}'.format(t, v)
+            for t, vocab in s.items():
+                print '\t  {}:: {}'.format(t, vocab)
 
     # convert to indices in vocab
     ix_train = convert_sequences(x_train, token_vocab.idx)
