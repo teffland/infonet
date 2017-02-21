@@ -537,7 +537,7 @@ def get_ace_extraction_data(count=0,
                 'ib_test':ib_test,
                 'im_test':im_test,
                 'ir_test':ir_test,
-                # names of input docs
+                # names of input docs and docs themselves
                 'f_train':f_train,
                 'f_dev':f_dev,
                 'f_test':f_test,

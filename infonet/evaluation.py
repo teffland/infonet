@@ -180,12 +180,14 @@ def mention_stats(m_preds, m_trues):
             stats[t]['support'] = s['tp'] + s['fp'] + s['fn']
     return stats
 
-def mention_relation_stats(m_trues, m_preds, r_trues, r_preds):
+def mention_relation_stats(m_trues, m_preds, r_trues, r_preds,
+                           max_r_dist=1000):
         stats = {'tp':0, 'fp':0, 'fn':0}
         stats['node'] = {'tp':0, 'fp':0, 'fn':0}
         stats['entity'] = {'tp':0, 'fp':0, 'fn':0}
         stats['event-anchor'] = {'tp':0, 'fp':0, 'fn':0}
-        stats['edge'] = {'tp':0, 'fp':0, 'fn':0}
+        stats['edge_over'] = {'tp':0, 'fp':0, 'fn':0}
+        stats['edge_under'] = {'tp':0, 'fp':0, 'fn':0}
         stats['relation'] = {'tp':0, 'fp':0, 'fn':0}
         stats['event-argument'] = {'tp':0, 'fp':0, 'fn':0}
         # nodes
@@ -349,9 +351,15 @@ def mention_relation_stats(m_trues, m_preds, r_trues, r_preds):
             stats['tp'] += len(tp)
             stats['fp'] += len(fp)
             stats['fn'] += len(fn)
-            stats['edge']['tp'] += len(tp)
-            stats['edge']['fp'] += len(fp)
-            stats['edge']['fn'] += len(fn)
+            under_tp = {r for r in tp if r[2]-r[1] < max_r_dist}
+            under_fp = {r for r in fp if r[2]-r[1] < max_r_dist}
+            under_fn = {r for r in fn if r[2]-r[1] < max_r_dist}
+            stats['edge_under']['tp'] += len(under_tp)
+            stats['edge_under']['fp'] += len(under_fp)
+            stats['edge_under']['fn'] += len(under_fn)
+            stats['edge_over']['tp'] += len(tp) - len(under_tp)
+            stats['edge_over']['fp'] += len(fp) - len(under_fp)
+            stats['edge_over']['fn'] += len(fn) - len(under_fn)
         # micro stats for all
         stats['precision'] = stats['tp'] / float(stats['tp'] + stats['fp'] + 1e-15)
         stats['recall'] = stats['tp'] / float(stats['tp'] + stats['fn'] + 1e-15)

@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block content %}
+<h3>Documents</h3>
+<ul>
+{% for doc in doc_names %}
+  <li><a href="{{ url_for('doc_compare', experiment=experiment, doc_name=doc) }}">{{doc}}</a></li>
+{% endfor %}
+</ul>
+{% endblock %}

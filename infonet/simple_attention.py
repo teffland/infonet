@@ -4,21 +4,20 @@ import chainer as ch
 import chainer.functions as F
 import chainer.links as L
 
-class SimpleAttention(ch.Link):
-    """ Implements an attention-weighted average.
+from masked_softmax import masked_softmax
 
-    Note: Only works on one variable length sequence."""
+class BatchPaddedAttention(ch.Link):
     def __init__(self, n_dim):
-        super(SimpleAttention, self).__init__(
-            w=(1, n_dim)
+        super(BatchPaddedAttention, self).__init__(
+            w=(1, n_dim, 1)
         )
         ch.initializers.Normal()(self.w.data)
 
-    def __call__(self, xs):
-        """ Expects xs to be a list-like of n h-d vectors or of shape [n , h]"""
-        if type(xs) in (tuple, list):
-            xs = F.vstack(xs)
-        scores = F.matmul(self.w, xs, transb=True)
-        scores = F.reshape(F.softmax(scores), (-1,1)) # softmax only works on second axis
-        scores = F.broadcast_to(scores, xs.shape)
-        return F.sum(scores * xs, axis=0)
+    def __call__(self, padded_xs, masks):
+        """ Expects xs to be of shape [n, max_wid, h] """
+        w = F.broadcast_to(self.w, (padded_xs.shape[0],)+self.w.shape[1:])
+        scores = F.reshape(F.batch_matmul(padded_xs, w), padded_xs.shape[:2]) # [n x max wid]
+        scores = masked_softmax(scores, masks[:,:,0])
+        scores = F.broadcast_to(F.expand_dims(scores, 2), padded_xs.shape) # [ n x wid x h]
+        scored = F.sum(scores * padded_xs, axis=1)
+        return scored

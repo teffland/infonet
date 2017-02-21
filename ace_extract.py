@@ -2,6 +2,7 @@ import os
 import argparse
 import yaml
 from datetime import datetime
+from pprint import pprint
 
 import numpy as np
 import numpy.random as npr
@@ -78,7 +79,7 @@ def setup_extractor(dataset, tagger_config, extractor_config, v=1):
     max_r_dist = extractor_config['relation_options'].pop('max_r_dist', 'infer')
     if max_r_dist == 'infer':
         max_r_dist = dataset['max_r_dist']
-    print 'Max r dist: {}'.format(dataset['max_r_dist'])
+    print 'Max r dist: {}'.format(max_r_dist)
     extractor_config['relation_options']['max_r_dist'] = max_r_dist
 
     extractor = Extractor(tagger,
@@ -89,20 +90,24 @@ def setup_extractor(dataset, tagger_config, extractor_config, v=1):
                           mtype2msubtype=mtype2msubtype,
                           msubtype2rtype=msubtype2rtype,
                           **extractor_config)
-    extractor_loss = ExtractorLoss(extractor, extractor_config['use_gold_boundaries'])
+    extractor_loss = ExtractorLoss(extractor,
+                                   use_gold_boundaries=extractor_config['use_gold_boundaries'])
     extractor_evaluator = ExtractorEvaluator(extractor,
                                              dataset['token_vocab'],
                                              dataset['pos_vocab'],
                                              dataset['boundary_vocab'],
                                              dataset['mention_vocab'],
                                              dataset['relation_vocab'],
-                                             dataset['tag_map'])
+                                             dataset['tag_map'],
+                                             use_gold_boundaries=extractor_config['use_gold_boundaries'])
     return extractor, extractor_loss, extractor_evaluator
 
 if __name__ == '__main__':
     # read input args
     args = parse_args()
     config = yaml.load(open(args.config_file))
+    print "Config: "
+    pprint(config)
     tagger_config = yaml.load(open(os.path.join(config['tagger'], 'config.yaml')))
     if args.eval:
         config = yaml.load(open(config['experiment_dir']+args.eval+'/config.yaml'))
@@ -130,10 +135,15 @@ if __name__ == '__main__':
         tagger_config['tagger'], config['extractor'], v=args.v)
 
     # train
+    extract_conf = config['extractor']
+    b_loss = (extract_conf['build_on_tagger_features']
+              or not extract_conf['use_gold_boundaries'])
     if not args.eval:
         train(extractor_loss, train_iter,
               extractor_evaluator, dev_iter,
-              config, save_prefix, v=args.v, reweight_relations=True)
+              config, save_prefix, v=args.v,
+              reweight_relations=extract_conf['relation_options']['reweight'],
+              **config['train'])
         extractor.rescale_Us() # for recurrent dropout
 
     # restore best and evaluate

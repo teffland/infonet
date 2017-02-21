@@ -63,10 +63,12 @@ def train(model_loss, train_iter, model_evaluator, dev_iter, config, save_prefix
         # reset
         model_loss.cleargrads()
         model_loss.reset_state()
-        #
+
         # run model
         start = time.time()
-        loss = model_loss(*zip(*batch), **loss_kwds)
+        loss = model_loss(*zip(*batch),
+                          epoch_i=train_iter.epoch,
+                          **loss_kwds)
         STATS['forward_times'].append(time.time()-start)
         loss_val = np.asscalar(loss.data)
         if v > 2:
@@ -75,15 +77,16 @@ def train(model_loss, train_iter, model_evaluator, dev_iter, config, save_prefix
                              train_iter.current_position,
                              train_iter.n_batches)
         STATS['epoch_losses'].append(loss_val)
-        
+
         # backprop
         start = time.time()
         loss.backward()
         optimizer.update()
         STATS['backward_times'].append(time.time()-start)
-        
+
         # report params and grads
         STATS['reports'].append(model_loss.report())
+        # print STATS['reports'][-1]
 
         # validation routine
         if train_iter.is_new_epoch:

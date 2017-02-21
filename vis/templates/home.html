@@ -2,7 +2,7 @@
 {% block content %}
 <ul>
   {% for expname in experiments %}
-  <li><a href='experiment/{{expname}}'>{{expname}}</a>
+  <li><a href="{{ url_for('experiment_home', experiment=expname) }}">{{expname}}</a>
   {% endfor %}
 </ul>
 {% endblock content %}

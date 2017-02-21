@@ -53,7 +53,7 @@ class MaskedSoftmax(function.Function):
         gx -= self.y * sumdx
         gx *= mask
 
-        return gx,
+        return gx, None
 
 
 def masked_softmax(x, mask):

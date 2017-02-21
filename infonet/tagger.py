@@ -133,12 +133,12 @@ class Tagger(ch.Chain, ReporterMixin):
         if reset:
             self.reset_state()
 
-        self.features = self(x_list, p_list, train=train)
+        features = self(x_list, p_list, train=train)
         if self.crf_type:
-            _, preds = self.crf.argmax(self.features)
+            _, preds = self.crf.argmax(features)
         else:
             preds = [ F.argmax(self.logit(feature), axis=1)
-                      for feature in self.features ]
+                      for feature in features ]
         if unfold_preds:
             return F.transpose_sequence(preds)
         return preds
