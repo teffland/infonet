@@ -228,7 +228,7 @@ def compute_mentions(doc, map_func_name, fine_grained=False):
     mentions = []
     for ann in doc['annotations']:
         if ann['ann-type'] == u'node':
-            if ann['node-type'] == 'value' and ('E' in map_func_name or 'NoVal' in map_func_name:
+            if ann['node-type'] == 'value' and ('E' in map_func_name or 'NoVal' in map_func_name):
                 continue
             if ann['node-type'] == 'event-anchor' and 'Entity' in map_func_name:
                 continue
