@@ -314,6 +314,7 @@ def get_ace_extraction_data(count=0,
     if type(splits) in (list, tuple):
         assert len(splits) == 3 and sum(splits) == 1.
         all_docs = glob(data_dir)
+        print all_docs[:5]
         random.shuffle(all_docs)
         t_split = int(splits[0]*len(all_docs))
         d_split = int(splits[1]*len(all_docs)) + t_split
