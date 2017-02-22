@@ -110,10 +110,10 @@ def relation_weights(dataset):
                 r2freq[r] += 1
             else:
                 r2freq[r] = 1
-    weights = np.array([r2freq.values()]).astype(np.float32)
+    weights = np.array(r2freq.values()).astype(np.float32)
     weights = weights.sum()/weights
     print 'weights:'
-    for i, w in enumerate(weights):
+    for i, w in enumerate(weights.tolist()):
         print '\t',dataset['relation_vocab'].token(i), w
 
 if __name__ == '__main__':
