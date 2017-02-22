@@ -102,6 +102,20 @@ def setup_extractor(dataset, tagger_config, extractor_config, v=1):
                                              use_gold_boundaries=extractor_config['use_gold_boundaries'])
     return extractor, extractor_loss, extractor_evaluator
 
+def relation_weights(dataset):
+    r2freq = {}
+    for rs in dataset['ir_train']:
+        for r in rs:
+            if r in r2freq:
+                r2freq[r] += 1
+            else:
+                r2freq[r] = 1
+    weights = np.array([r2freq.values()]).astype(np.float32)
+    weights = weights.sum()/weights
+    print 'weights:'
+    for i, w in enumerate(weights):
+        print '\t',dataset['relation_vocab'].token(i), w
+
 if __name__ == '__main__':
     # read input args
     args = parse_args()
@@ -139,11 +153,13 @@ if __name__ == '__main__':
     extract_conf = config['extractor']
     b_loss = (extract_conf['build_on_tagger_features']
               or not extract_conf['use_gold_boundaries'])
+    if extract_conf['relation_options']['reweight']:
+        relation_weights = relation_weights(dataset)
     if not args.eval:
         train(extractor_loss, train_iter,
               extractor_evaluator, dev_iter,
               config, save_prefix, v=args.v,
-              reweight_relations=extract_conf['relation_options']['reweight'],
+              relation_weights=relation_weights,
               **config['train'])
         extractor.rescale_Us() # for recurrent dropout
 

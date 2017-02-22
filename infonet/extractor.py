@@ -622,7 +622,7 @@ class ExtractorLoss(ch.Chain):
         # b_loss = kwds.pop('b_loss', True)
         # m_loss = kwds.pop('m_loss', True)
         # r_loss = kwds.pop('r_loss', True)
-        reweight_relations = kwds.pop('reweight_relations', False)
+        relation_weights = kwds.pop('relation_weights', None)
         boundary_reweighting = kwds.pop('boundary_reweighting', False)
 
         # determine which losses to run
@@ -721,20 +721,20 @@ class ExtractorLoss(ch.Chain):
                 # eg, where normal class weights would be [1,1,...,1] (sum=N)
                 # they would look something like [.5, 1.5, ..., 1] (sum=N)
                 # NOTE: unseen labels get a count of one, for smoothing
-                if reweight_relations:
-                    unique, counts = np.unique(labels[weights==1.], return_counts=True)
-                    class_weights = np.ones(self.extractor.n_relation_class, dtype=np.float32)
-                    class_weights[unique] = counts
-                    total = class_weights.sum().astype(np.float32)
-                    class_weights = total/class_weights
-                    class_weights = class_weights/(class_weights.sum()/self.extractor.n_relation_class)
+                if relation_weights:
+                    # unique, counts = np.unique(labels[weights==1.], return_counts=True)
+                    # class_weights = np.ones(self.extractor.n_relation_class, dtype=np.float32)
+                    # class_weights[unique] = counts
+                    # total = class_weights.sum().astype(np.float32)
+                    # class_weights = total/class_weights
+                    # class_weights = class_weights/(class_weights.sum()/self.extractor.n_relation_class)
                     # print 'class_weights {}, {}'.format(class_weights.sum(), class_weights)
                     # print r_logits.shape, class_weights.shape, class_weights
                     # assert class_weights.sum() == self.extractor.n_relation_class, '{} != {}'.format(
                     #     class_weights.sum(), self.extractor.n_relation_class
                     # )
                     doc_relation_loss = batch_weighted_softmax_cross_entropy(r_logits, labels,
-                                                                         class_weight=class_weights,
+                                                                         class_weight=relation_weights,
                                                                          instance_weight=weights)
                 else:
                     doc_relation_loss = batch_weighted_softmax_cross_entropy(r_logits, labels,
