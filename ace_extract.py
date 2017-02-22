@@ -111,7 +111,9 @@ def relation_weights(dataset):
                 r2freq[r] += 1
             else:
                 r2freq[r] = 1
-    weights = np.array(r2freq.values()).astype(np.float32)
+    weights = np.ones(dataset['boundary_vocab'].v).astype(np.float32)
+    for i, w in r2freq.items():
+        weights[i] = w
     weights = weights.sum()/weights
     print 'weights:'
     for i, w in enumerate(weights.tolist()):
