@@ -106,12 +106,12 @@ def relation_weights(dataset):
     r2freq = {}
     for rs in dataset['ir_train']:
         for r in rs:
-            r = r[4]
-            if r in r2freq:
-                r2freq[r] += 1
+            rc = r[4]
+            if rc in r2freq:
+                r2freq[rc] += 1
             else:
-                r2freq[r] = 1
-    weights = np.ones(dataset['boundary_vocab'].v).astype(np.float32)
+                r2freq[rc] = 1
+    weights = np.ones(dataset['relation_vocab'].v).astype(np.float32)
     for i, w in r2freq.items():
         weights[i] = w
     weights = weights.sum()/weights
