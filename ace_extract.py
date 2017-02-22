@@ -21,7 +21,7 @@ def parse_args():
     parser.add_argument('config_file', help='YAML file containing configuration')
     parser.add_argument('--eval', type=str, default='',
                         help='Override experiment to evaluate model with this name')
-    parser.add_argument('-v', '--verbosity', type=int, default=2,
+    parser.add_argument('-v', '--verbosity', type=int, default=3,
                         help='0 for nothing, 1 for stages, 2 for most, 3 for way too much')
 
     args = parser.parse_args()
