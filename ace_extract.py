@@ -106,6 +106,7 @@ def relation_weights(dataset):
     r2freq = {}
     for rs in dataset['ir_train']:
         for r in rs:
+            r = r[4]
             if r in r2freq:
                 r2freq[r] += 1
             else:
