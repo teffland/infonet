@@ -221,14 +221,16 @@ def compute_typemaps(docs):
     mtype2msubtype['<UNK>'] = mtype2msubtype.values()[0]
     return mtype2msubtype, msubtype2rtype
 
-def compute_mentions(doc, fine_grained=False, omit_timex=True):
+def compute_mentions(doc, map_func_name, fine_grained=False):
     """ Compute gold mentions as (*span, type) from yaat.
 
     Return them sorted lexicographicaly. """
     mentions = []
     for ann in doc['annotations']:
         if ann['ann-type'] == u'node':
-            if omit_timex and ann['node-type'] == 'value':
+            if ann['node-type'] == 'value' and ('E' in map_func_name or 'NoVal' in map_func_name:
+                continue
+            if ann['node-type'] == 'event-anchor' and 'Entity' in map_func_name:
                 continue
             mention_type = ann['node-type']+':'+ann['type']
             # always use event anchor subtypes (needed for correct roles)
@@ -300,7 +302,7 @@ def resolve_mentions_and_relations(annotations):
     return resolved_annotations
 
 def get_ace_extraction_data(count=0,
-                            splits_dir='data/ACE 2005/splits/',
+                            splits='data/ACE 2005/splits/',
                             data_dir='data/ACE 2005/yaat/',
                             map_func_name='NoVal_BIO_map',
                             train_vocab_only=False,
@@ -308,15 +310,26 @@ def get_ace_extraction_data(count=0,
                             v=1):
     if v > 0:
         print "Loading data..."
-    if not splits_dir.endswith('/'): splits_dir += '/'
     if not data_dir.endswith('/'): data_dir += '/'
-    train_set = open(splits_dir+'train.txt', 'r').read().split()
-    dev_set = open(splits_dir+'dev.txt', 'r').read().split()
-    test_set = open(splits_dir+'test.txt', 'r').read().split()
+    if type(splits) in (list, tuple):
+        assert len(splits) == 3 and sum(splits) == 1.
+        all_docs = glob(data_dir)
+        random.shuffle(all_docs)
+        t_split = int(splits[0]*len(all_docs))
+        d_split = int(splits[1]*len(all_docs)) + t_split
+        train_set = all_docs[:t_split]
+        dev_set = all_docs[t_split:d_split]
+        test_set = all_docs[d_split:]
+    else:
+        splits_dir = splits
+        if not splits_dir.endswith('/'): splits_dir += '/'
+        train_set = [ f+'.yaat' for f in open(splits_dir+'train.txt', 'r').read().split() ]
+        dev_set = [ f+'.yaat' for f in open(splits_dir+'dev.txt', 'r').read().split() ]
+        test_set = [ f+'.yaat' for f in open(splits_dir+'test.txt', 'r').read().split() ]
 
-    train_docs = [ json.loads(io.open(data_dir+f+'.yaat', 'r').read()) for f in train_set ]
-    dev_docs = [ json.loads(io.open(data_dir+f+'.yaat', 'r').read()) for f in dev_set]
-    test_docs = [ json.loads(io.open(data_dir+f+'.yaat', 'r').read()) for f in test_set]
+    train_docs = [ json.loads(io.open(data_dir+f, 'r').read()) for f in train_set ]
+    dev_docs = [ json.loads(io.open(data_dir+f, 'r').read()) for f in dev_set]
+    test_docs = [ json.loads(io.open(data_dir+f, 'r').read()) for f in test_set]
     for doc, fname in zip(train_docs+dev_docs+test_docs, train_set+dev_set+test_set):
         doc.update({'fname':fname})
     # train_data = json.loads(io.open('data/ace_05_head_yaat_train.json', 'r').read())
@@ -358,7 +371,7 @@ def get_ace_extraction_data(count=0,
                 boundary_vocab.add(doc['boundary_labels'])
 
             # mention labels
-            doc['mentions'] = compute_mentions(doc)
+            doc['mentions'] = compute_mentions(doc, map_func_name)
             if dataset_i==0: # use only train data to estimate vocabs
                 mention_vocab.add([m[2] for m in doc['mentions']])
 
