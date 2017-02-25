@@ -158,6 +158,8 @@ if __name__ == '__main__':
               or not extract_conf['use_gold_boundaries'])
     if extract_conf['relation_options']['reweight']:
         relation_weights = relation_weights(dataset)
+    else:
+        relation_weights = None
     if not args.eval:
         train(extractor_loss, train_iter,
               extractor_evaluator, dev_iter,
